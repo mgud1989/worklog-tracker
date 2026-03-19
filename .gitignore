@@ -3,3 +3,4 @@ dist/
 .env
 mcp.config.json
 .DS_Store
+toggl-mcp-project-spec.md
