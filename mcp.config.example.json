@@ -1,0 +1,6 @@
+{
+  "workspaceId": "your-workspace-id",
+  "timezone": "America/Argentina/Buenos_Aires",
+  "defaultIssueKey": "INFRAV2-543",
+  "defaultWorkAttributes": "Desarrollo e Implementacion"
+}
