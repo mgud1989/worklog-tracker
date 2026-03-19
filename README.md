@@ -99,6 +99,21 @@ Usar ruta absoluta al build evita problemas de `cwd`:
   - Usa `defaultWorkAttributes` (tool input o `mcp.config.json`).
   - Evita duplicados con marcador en descripción de Tempo: `[toggl:<entryId>]`.
 
+## Getting API Tokens
+
+1. **Toggl API Token**:
+    - Go to [Toggl profile](https://track.toggl.com/profile)
+    - Scroll down to the bottom
+
+2. **Tempo API Token**:
+
+   - Go to Tempo > Settings > API Integration
+   - Create a new API token with appropriate permissions
+
+3. **Jira API Token**:
+   - Go to [Atlassian API tokens](https://id.atlassian.com/manage-profile/security/api-tokens)
+   - Create a new API token for your account
+
 ## Prácticas operativas recomendadas
 
 - Rotar tokens periódicamente (Toggl, Tempo, Jira).
