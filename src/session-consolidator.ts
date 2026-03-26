@@ -252,6 +252,7 @@ export function consolidateSessions(
       totalMinutes: number;
       sessionIds: Set<string>;
       windowCount: number;
+      earliestStart: Date;
     }
   >();
 
@@ -265,11 +266,15 @@ export function consolidateSessions(
       totalMinutes: 0,
       sessionIds: new Set<string>(),
       windowCount: 0,
+      earliestStart: w.start,
     };
 
     bucket.totalMinutes += w.durationMinutes;
     bucket.sessionIds.add(w.sessionId);
     bucket.windowCount += 1;
+    if (w.start < bucket.earliestStart) {
+      bucket.earliestStart = w.start;
+    }
     buckets.set(key, bucket);
   }
 
@@ -285,6 +290,7 @@ export function consolidateSessions(
       issueKey: issueKey ?? "",
       branch: bucket.branch,
       date: bucket.date,
+      startTime: getTimeString(bucket.earliestStart),
       durationHours,
       sessionIds,
       windowCount: bucket.windowCount,
@@ -381,4 +387,10 @@ function getDateString(date: Date): string {
   const month = String(date.getMonth() + 1).padStart(2, "0");
   const day = String(date.getDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
+}
+
+function getTimeString(date: Date): string {
+  const hours = String(date.getHours()).padStart(2, "0");
+  const minutes = String(date.getMinutes()).padStart(2, "0");
+  return `${hours}:${minutes}`;
 }

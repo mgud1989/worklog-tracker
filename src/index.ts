@@ -286,6 +286,7 @@ async function bootstrap() {
                     issueKey: { type: "string" },
                     branch: { type: "string" },
                     date: { type: "string" },
+                    startTime: { type: "string", description: "HH:MM — start time for the worklog" },
                     durationHours: { type: "number" },
                     sessionIds: {
                       type: "array",
@@ -298,6 +299,7 @@ async function bootstrap() {
                     "issueKey",
                     "branch",
                     "date",
+                    "startTime",
                     "durationHours",
                     "sessionIds",
                     "windowCount",
@@ -531,6 +533,7 @@ async function bootstrap() {
               issueKey: worklog.issueKey,
               timeSpentHours: worklog.durationHours,
               date: worklog.date,
+              startTime: worklog.startTime,
               description: worklog.description,
               workAttributes: appConfig.defaultWorkAttributes,
             });

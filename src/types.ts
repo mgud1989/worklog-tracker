@@ -103,6 +103,7 @@ export type ConsolidatedWorklog = {
   issueKey: string;
   branch: string;
   date: string;
+  startTime: string; // HH:MM — earliest activity window start
   durationHours: number;
   sessionIds: string[];
   windowCount: number;

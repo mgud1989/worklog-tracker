@@ -181,6 +181,7 @@ const consolidatedWorklogSchema = z.object({
   issueKey: z.string().min(1),
   branch: z.string().min(1),
   date: dateSchema,
+  startTime: z.string().regex(/^\d{2}:\d{2}$/, "Expected HH:MM format"),
   durationHours: z.number().positive(),
   sessionIds: z.array(z.string().min(1)).min(1),
   windowCount: z.number().int().positive(),

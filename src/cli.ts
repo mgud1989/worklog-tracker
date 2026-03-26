@@ -315,6 +315,7 @@ async function runTempoPushCommand(flags: string[]): Promise<void> {
         issueKey: worklog.issueKey,
         timeSpentHours: worklog.durationHours,
         date: worklog.date,
+        startTime: worklog.startTime,
         description: worklog.description,
         workAttributes: appConfig.defaultWorkAttributes,
       });
