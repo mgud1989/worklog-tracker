@@ -22,7 +22,7 @@ fi
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LOG_DIR="${SCRIPT_DIR}/.session-logs"
 mkdir -p "$LOG_DIR"
-LOG_FILE="${LOG_DIR}/session.log"
+LOG_FILE="${LOG_DIR}/session-$(date +%Y-%m).log"
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 timestamp() { date +"%d-%m-%Y %H:%M:%S"; }
