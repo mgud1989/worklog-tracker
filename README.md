@@ -1,43 +1,45 @@
 # Toggl + Tempo MCP Server
 
-Servidor MCP en TypeScript para operar tracking en Toggl y carga de horas en Tempo/Jira desde agentes IA.
+Servidor MCP para tracking automático en Toggl y carga de horas en Tempo/Jira desde agentes IA (Claude Code, Cursor, etc.).
 
-## Objetivo
-
-- Exponer herramientas MCP para registrar/editar tiempo en Toggl.
-- Exponer herramientas MCP para crear/consultar worklogs en Tempo.
-- Sincronizar bloques cerrados de Toggl hacia Tempo con reglas de fallback.
-
-## Requisitos
-
-- Node.js 20+.
-- `mcp.config.json` con `workspaceId` y `timezone`.
-- Archivo `.env` con credenciales (no se recomienda hardcodear secretos en la config MCP del cliente).
-
-## Configuración
-
-### 1) Variables de entorno
-
-Crea `.env` basado en `.env.example`:
+## Quick Start
 
 ```bash
-TOGGL_API_TOKEN=...
-
-TEMPO_API_TOKEN=...
-JIRA_BASE_URL=https://your-org.atlassian.net
-JIRA_API_TOKEN=...
-JIRA_EMAIL=you@company.com
-JIRA_AUTH_TYPE=basic
-JIRA_TEMPO_ACCOUNT_CUSTOM_FIELD_ID=
+git clone <repo-url> && cd toggl-mcp
+./install.sh
 ```
 
-Notas:
-- El servidor carga `.env` automáticamente desde `process.cwd()`.
-- Si necesitas otra ubicación, usa `DOTENV_PATH=/ruta/al/.env`.
+El script instala dependencias, compila, crea archivos de config y configura los hooks globales de Claude Code.
 
-### 2) Config MCP del servidor
+Despues edita:
+1. **`.env`** — tus API tokens (Toggl, Tempo, Jira)
+2. **`mcp.config.json`** — tu `workspaceId` de Toggl
 
-Ejemplo de `mcp.config.json`:
+Listo.
+
+## Que hace
+
+- **MCP Server**: expone herramientas para registrar/editar tiempo en Toggl, crear worklogs en Tempo y sincronizar entre ambos.
+- **Claude Code Hooks**: arranca y para el timer de Toggl automaticamente con cada sesion de Claude Code.
+- **CLI**: `node dist/cli.js` para control manual del timer.
+
+## Configuracion
+
+### `.env`
+
+| Variable | Descripcion |
+|----------|-------------|
+| `TOGGL_API_TOKEN` | Token de API de Toggl |
+| `TEMPO_API_TOKEN` | Token de API de Tempo |
+| `JIRA_BASE_URL` | URL de tu org (`https://tu-org.atlassian.net`) |
+| `JIRA_API_TOKEN` | Token de API de Jira |
+| `JIRA_EMAIL` | Tu email de Atlassian |
+| `JIRA_AUTH_TYPE` | `basic` (default) o `bearer` |
+| `JIRA_TEMPO_ACCOUNT_CUSTOM_FIELD_ID` | Opcional: ID del custom field de Tempo Account |
+
+El servidor carga `.env` desde `process.cwd()`. Para otra ubicacion: `DOTENV_PATH=/ruta/al/.env`.
+
+### `mcp.config.json`
 
 ```json
 {
@@ -48,15 +50,26 @@ Ejemplo de `mcp.config.json`:
 }
 ```
 
-Notas:
-- `defaultIssueKey` y `defaultWorkAttributes` se usan como fallback en `sync_toggl_range_to_tempo`.
-- `defaultWorkAttributes` puede ser:
-  - string: se interpreta como `_Tipotarea_` (caso Tempo común), o
-  - array: `[{ "key": "_Tipotarea_", "value": "DesarrolloeImplementacion" }]`.
+- `workspaceId` — lo encontras en la URL de Toggl: `track.toggl.com/{workspaceId}/...`
+- `timezone` — timezone del equipo
+- `defaultIssueKey` — fallback para sync cuando la entrada no tiene issue key
+- `defaultWorkAttributes` — puede ser string o array de `{ key, value }`
 
-### 3) Config MCP del cliente (Cursor/Claude/etc.)
+## Claude Code Hooks
 
-Usar ruta absoluta al build evita problemas de `cwd`:
+Los hooks se instalan globalmente en `~/.claude/settings.json` y corren en TODA sesion:
+
+| Evento | Accion |
+|--------|--------|
+| **SessionStart** | Inicia timer en Toggl (descripcion = branch actual) + log de sesion |
+| **Stop** | Registra actividad en el session logger |
+| **SessionEnd** | Para timer en Toggl + log de cierre de sesion |
+
+Para remover: `scripts/setup-global-hooks.sh --remove`
+
+## MCP Client Config
+
+Agrega el servidor a tu cliente MCP (Claude Code, Cursor, etc.):
 
 ```json
 {
@@ -71,55 +84,36 @@ Usar ruta absoluta al build evita problemas de `cwd`:
 }
 ```
 
-## Scripts
-
-- `npm run dev`: ejecuta server en modo desarrollo.
-- `npm run build`: compila TypeScript a `dist/`.
-- `npm run start`: ejecuta el build compilado.
+Usa rutas absolutas para evitar problemas de `cwd`.
 
 ## Tools MCP
 
 ### Toggl
 
-- `log_work_entry`: crea entrada cerrada (`description`, `timeRange`, `project?`, `tags?`).
-- `smart_timer_control`: start/stop de timer (`action`, `description?`, `time?`, `project?`, `tags?`).
-- `read_tracking_data`: lista entradas por rango (`timeRange`).
-- `update_work_entry`: edita entrada existente (`entryId`, `description?`, `start?`, `stop?`, `project?`, `tags?`).
+- **`log_work_entry`** — crea entrada cerrada (`description`, `timeRange`, `project?`, `tags?`)
+- **`smart_timer_control`** — start/stop de timer (`action`, `description?`, `time?`, `project?`, `tags?`)
+- **`read_tracking_data`** — lista entradas por rango (`timeRange`)
+- **`update_work_entry`** — edita entrada existente (`entryId`, campos opcionales)
 
 ### Tempo
 
-- `tempo_create_worklog`: crea worklog en Tempo/Jira (`issueKey`, `timeSpentHours`, `date`, `description?`, `startTime?`, `workAttributes?`).
-- `tempo_read_worklogs`: lista worklogs del usuario autenticado (`startDate`, `endDate`).
+- **`tempo_create_worklog`** — crea worklog en Tempo/Jira (`issueKey`, `timeSpentHours`, `date`)
+- **`tempo_read_worklogs`** — lista worklogs del usuario (`startDate`, `endDate`)
 
 ### Sync
 
-- `sync_toggl_range_to_tempo`: sincroniza entradas cerradas de Toggl a Tempo por rango.
-  - Busca `ISSUE-123` en la descripción de cada entrada.
-  - Si no encuentra, usa `defaultIssueKey` (tool input o `mcp.config.json`).
-  - Usa `defaultWorkAttributes` (tool input o `mcp.config.json`).
-  - Evita duplicados con marcador en descripción de Tempo: `[toggl:<entryId>]`.
+- **`sync_toggl_range_to_tempo`** — sincroniza entradas de Toggl a Tempo por rango. Busca `ISSUE-123` en la descripcion; si no encuentra, usa `defaultIssueKey`. Evita duplicados con marcador `[toggl:<entryId>]`.
 
 ## Getting API Tokens
 
-1. **Toggl API Token**:
-    - Go to [Toggl profile](https://track.toggl.com/profile)
-    - Scroll down to the bottom
+1. **Toggl** — [track.toggl.com/profile](https://track.toggl.com/profile) → scroll al fondo
+2. **Tempo** — Tempo > Settings > API Integration → crear token
+3. **Jira** — [id.atlassian.com/manage-profile/security/api-tokens](https://id.atlassian.com/manage-profile/security/api-tokens) → crear token
 
-2. **Tempo API Token**:
+## Uninstall
 
-   - Go to Tempo > Settings > API Integration
-   - Create a new API token with appropriate permissions
+```bash
+scripts/setup-global-hooks.sh --remove
+```
 
-3. **Jira API Token**:
-   - Go to [Atlassian API tokens](https://id.atlassian.com/manage-profile/security/api-tokens)
-   - Create a new API token for your account
-
-## Prácticas operativas recomendadas
-
-- Rotar tokens periódicamente (Toggl, Tempo, Jira).
-- No exponer `.env` en repositorio ni en logs.
-- Mantener `timezone` único del equipo para evitar desfasajes de horas.
-
-## Mantenimiento
-
-- Documento de arquitectura y operación: `ARCHITECTURE.md`.
+Esto remueve los hooks de `~/.claude/settings.json`. El resto del proyecto se borra manualmente.
