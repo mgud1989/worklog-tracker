@@ -30,8 +30,8 @@ if [[ "${1:-}" == "--remove" ]]; then
   fi
   echo "Removing toggl-mcp hooks from $CLAUDE_SETTINGS..."
 
-  # Remove only hook entries whose command contains toggl-mcp, preserve the rest
-  jq --arg marker "toggl-mcp" '
+  # Remove only hook entries whose command contains session-logger.sh, preserve the rest
+  jq --arg marker "session-logger.sh" '
     if .hooks then
       .hooks |= with_entries(
         .value |= map(
