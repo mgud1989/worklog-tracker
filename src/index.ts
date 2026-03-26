@@ -9,7 +9,7 @@ import {
 import { dirname, resolve } from "node:path";
 import { ZodError } from "zod";
 import { loadAndValidateEnv, loadMcpConfig } from "./config.js";
-import { consolidateSessions, buildPushPreview } from "./session-consolidator.js";
+import { consolidateSessions, buildPushPreview, filterAlreadyPushed } from "./session-consolidator.js";
 import { parseSessionLogs } from "./session-log-parser.js";
 import { TempoJiraAdapter } from "./tempo-jira-adapter.js";
 import { TogglTempoAdapter } from "./toggl-tempo-adapter.js";
@@ -471,7 +471,28 @@ async function bootstrap() {
           inactivityThresholdMinutes: appConfig.inactivityThresholdMinutes,
           defaultIssueKey: appConfig.defaultIssueKey,
         });
-        const preview = buildPushPreview(worklogs);
+
+        // Filter out already-pushed worklogs
+        let alreadyPushedCount = 0;
+        let toPush = worklogs;
+        if (tempoJiraAdapter) {
+          try {
+            const existing = await tempoJiraAdapter.readWorklogs({
+              startDate: from,
+              endDate: to,
+            });
+            const existingDescriptions = (existing as Array<{ description: string }>).map(
+              (w) => w.description ?? ""
+            );
+            const filtered = filterAlreadyPushed(worklogs, existingDescriptions);
+            toPush = filtered.toPush;
+            alreadyPushedCount = filtered.alreadyPushed.length;
+          } catch {
+            // If we can't check, show all worklogs
+          }
+        }
+
+        const preview = buildPushPreview(toPush);
 
         return buildToolResponse({
           ok: true,
@@ -481,6 +502,7 @@ async function bootstrap() {
           details: {
             input: { from, to },
             logDir,
+            alreadyPushedCount,
             preview,
           },
         });
@@ -510,6 +532,7 @@ async function bootstrap() {
               timeSpentHours: worklog.durationHours,
               date: worklog.date,
               description: worklog.description,
+              workAttributes: appConfig.defaultWorkAttributes,
             });
             results.push({
               issueKey: worklog.issueKey,
