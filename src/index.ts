@@ -312,6 +312,22 @@ async function bootstrap() {
             required: ["worklogs"],
             additionalProperties: false
           }
+        },
+        {
+          name: "tempo_delete_worklog",
+          description:
+            "Delete a Tempo worklog by its tempoWorklogId. Use tempo_read_worklogs to find IDs first.",
+          inputSchema: {
+            type: "object",
+            properties: {
+              tempoWorklogId: {
+                type: "number",
+                description: "The Tempo worklog ID to delete"
+              }
+            },
+            required: ["tempoWorklogId"],
+            additionalProperties: false
+          }
         }
       ]
     };
@@ -568,6 +584,32 @@ async function bootstrap() {
             failed,
             total: results.length,
             results,
+          },
+        });
+      }
+
+      if (name === "tempo_delete_worklog") {
+        if (!tempoJiraAdapter) {
+          throw new McpError(
+            ErrorCode.InvalidRequest,
+            "Tempo/Jira environment is not configured. Set TEMPO_API_TOKEN, JIRA_BASE_URL and JIRA_API_TOKEN."
+          );
+        }
+
+        const { tempoWorklogId } = args as { tempoWorklogId: number };
+        if (!tempoWorklogId || typeof tempoWorklogId !== "number") {
+          throw new McpError(ErrorCode.InvalidParams, "tempoWorklogId (number) is required");
+        }
+
+        await tempoJiraAdapter.deleteWorklog(tempoWorklogId);
+
+        return buildToolResponse({
+          ok: true,
+          action: name,
+          workspaceId: appConfig.workspaceId,
+          timezone: appConfig.timezone,
+          details: {
+            deleted: tempoWorklogId,
           },
         });
       }

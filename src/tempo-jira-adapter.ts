@@ -83,6 +83,12 @@ export class TempoJiraAdapter {
     }));
   }
 
+  async deleteWorklog(tempoWorklogId: number): Promise<void> {
+    await this.tempoRequest(`/worklogs/${tempoWorklogId}`, {
+      method: "DELETE",
+    });
+  }
+
   async syncTogglRangeToTempo(
     input: SyncTogglRangeToTempoInput,
     togglEntries: unknown
