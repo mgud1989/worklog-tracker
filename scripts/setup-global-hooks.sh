@@ -73,47 +73,41 @@ if [[ ! -f "$CLAUDE_SETTINGS" ]]; then
   exit 1
 fi
 
-# ── Build hooks object ───────────────────────────────────────────────────────
+# ── Read mode from mcp.config.json ───────────────────────────────────────────
+MCP_CONFIG="$TOGGL_MCP_DIR/mcp.config.json"
+if [[ -f "$MCP_CONFIG" ]]; then
+  MODE=$(jq -r '.mode // "both"' "$MCP_CONFIG")
+else
+  MODE="both"
+fi
+
+if [[ "$MODE" != "toggl" && "$MODE" != "tempo" && "$MODE" != "both" ]]; then
+  echo "ERROR: Invalid mode '$MODE' in mcp.config.json. Expected: toggl, tempo, or both" >&2
+  exit 1
+fi
+
+echo "Mode: $MODE"
+
+# ── Build hooks based on mode ────────────────────────────────────────────────
+# Session logger hooks run in ALL modes (foundation for tempo push)
+# Toggl timer hooks only in "toggl" and "both"
+
+SESSION_START_HOOKS="{ \"type\": \"command\", \"command\": \"$SESSION_LOGGER start\" }"
+STOP_HOOKS="{ \"type\": \"command\", \"command\": \"$SESSION_LOGGER activity\" }"
+SESSION_END_HOOKS="{ \"type\": \"command\", \"command\": \"$SESSION_LOGGER stop\" }"
+
+if [[ "$MODE" == "toggl" || "$MODE" == "both" ]]; then
+  TOGGL_START="{ \"type\": \"command\", \"command\": \"BRANCH=\$(git branch --show-current 2>/dev/null || echo 'no-branch') && cd $TOGGL_MCP_DIR && node $CLI_JS timer start --description \\\"\$BRANCH\\\"\" }"
+  TOGGL_STOP="{ \"type\": \"command\", \"command\": \"cd $TOGGL_MCP_DIR && node $CLI_JS timer stop\" }"
+  SESSION_START_HOOKS="$SESSION_START_HOOKS, $TOGGL_START"
+  SESSION_END_HOOKS="$SESSION_END_HOOKS, $TOGGL_STOP"
+fi
+
 HOOKS_JSON=$(cat <<ENDJSON
 {
-  "SessionStart": [
-    {
-      "hooks": [
-        {
-          "type": "command",
-          "command": "$SESSION_LOGGER start"
-        },
-        {
-          "type": "command",
-          "command": "BRANCH=\$(git branch --show-current 2>/dev/null || echo 'no-branch') && cd $TOGGL_MCP_DIR && node $CLI_JS timer start --description \"\$BRANCH\""
-        }
-      ]
-    }
-  ],
-  "Stop": [
-    {
-      "hooks": [
-        {
-          "type": "command",
-          "command": "$SESSION_LOGGER activity"
-        }
-      ]
-    }
-  ],
-  "SessionEnd": [
-    {
-      "hooks": [
-        {
-          "type": "command",
-          "command": "$SESSION_LOGGER stop"
-        },
-        {
-          "type": "command",
-          "command": "cd $TOGGL_MCP_DIR && node $CLI_JS timer stop"
-        }
-      ]
-    }
-  ]
+  "SessionStart": [ { "hooks": [ $SESSION_START_HOOKS ] } ],
+  "Stop": [ { "hooks": [ $STOP_HOOKS ] } ],
+  "SessionEnd": [ { "hooks": [ $SESSION_END_HOOKS ] } ]
 }
 ENDJSON
 )
@@ -128,6 +122,7 @@ echo ""
 echo "Hooks installed globally. Paths resolved to:"
 echo "  session-logger: $SESSION_LOGGER"
 echo "  cli.js:         $CLI_JS"
+echo "  mode:           $MODE"
 echo ""
 echo "These hooks will run on ALL Claude Code sessions."
 echo "To remove: $0 --remove"

@@ -1,6 +1,7 @@
 {
   "workspaceId": "your-workspace-id",
   "timezone": "America/Argentina/Buenos_Aires",
-  "defaultIssueKey": "INFRAV2-543",
+  "mode": "both",
+  "defaultIssueKey": "HORAS-1",
   "defaultWorkAttributes": "Desarrollo e Implementacion"
 }
