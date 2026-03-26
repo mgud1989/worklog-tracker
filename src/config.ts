@@ -38,7 +38,9 @@ const configSchema = z.object({
         })
       )
     ])
-    .optional()
+    .optional(),
+  mode: z.enum(["toggl", "tempo", "both"]).optional().default("toggl"),
+  inactivityThresholdMinutes: z.number().int().positive().optional().default(10)
 });
 
 const envSchema = z
@@ -123,7 +125,9 @@ export function loadMcpConfig(configPathFromEnv?: string): AppConfig {
     workspaceId: rawConfig.workspaceId,
     timezone: rawConfig.timezone,
     defaultIssueKey: rawConfig.defaultIssueKey,
-    defaultWorkAttributes
+    defaultWorkAttributes,
+    mode: rawConfig.mode,
+    inactivityThresholdMinutes: rawConfig.inactivityThresholdMinutes
   };
 }
 

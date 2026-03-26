@@ -67,6 +67,8 @@ export type AppConfig = {
   timezone: string;
   defaultIssueKey?: string;
   defaultWorkAttributes?: Array<{ key: string; value: string }>;
+  mode: "toggl" | "tempo" | "both";
+  inactivityThresholdMinutes: number;
 };
 
 export type ToolResultPayload = {
@@ -75,4 +77,48 @@ export type ToolResultPayload = {
   workspaceId: string;
   timezone: string;
   details: Record<string, unknown>;
+};
+
+// --- Tempo Push types ---
+
+export type SessionLogLabel = "START" | "STOP" | "ACTIVITY" | "INACTIVITY";
+
+export type LogEntry = {
+  timestamp: Date;
+  label: SessionLogLabel;
+  branch: string;
+  sessionId: string;
+  rawLine: string;
+};
+
+export type WorkWindow = {
+  start: Date;
+  end: Date;
+  branch: string;
+  sessionId: string;
+  durationMinutes: number;
+};
+
+export type ConsolidatedWorklog = {
+  issueKey: string;
+  branch: string;
+  date: string;
+  durationHours: number;
+  sessionIds: string[];
+  windowCount: number;
+  description: string;
+};
+
+export type PushPreview = {
+  worklogs: ConsolidatedWorklog[];
+  totalHours: number;
+  dateRange: { from: string; to: string };
+  unmappedBranches: string[];
+};
+
+export type TempoPushResult = {
+  pushed: number;
+  skipped: number;
+  failed: number;
+  details: Array<{ issueKey: string; status: string; error?: string }>;
 };
