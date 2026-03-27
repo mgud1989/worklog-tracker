@@ -102,11 +102,11 @@ export class TogglTempoAdapter {
       });
     }
 
-    const current = await this.request<{ id?: number }>("/me/time_entries/current", {
+    const current = await this.request<{ id?: number } | null>("/me/time_entries/current", {
       method: "GET"
     });
 
-    if (!current.id) {
+    if (!current?.id) {
       throw new Error("No running timer found to stop");
     }
 

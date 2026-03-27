@@ -89,7 +89,28 @@ ok "Global hooks installed"
 
 echo ""
 
-# ── 7. Print next steps ────────────────────────────────────────────────────
+# ── 7. Register MCP server in Claude Code ─────────────────────────────────
+info "Registering toggl MCP server in Claude Code..."
+
+if ! command -v claude &>/dev/null; then
+  warn "claude CLI not found — skipping MCP registration"
+  warn "You can register manually later with:"
+  warn "  claude mcp add toggl -s user -e MCP_CONFIG_PATH=\"${SCRIPT_DIR}/mcp.config.json\" -- node \"${SCRIPT_DIR}/dist/index.js\""
+else
+  # Remove existing registration (if any) to ensure clean state
+  claude mcp remove toggl -s user 2>/dev/null || true
+
+  claude mcp add toggl \
+    -s user \
+    -e MCP_CONFIG_PATH="${SCRIPT_DIR}/mcp.config.json" \
+    -- node "${SCRIPT_DIR}/dist/index.js"
+
+  ok "MCP server registered (scope: user)"
+fi
+
+echo ""
+
+# ── 8. Print next steps ────────────────────────────────────────────────────
 echo -e "${BOLD}${GREEN}Install complete!${NC}"
 echo ""
 echo -e "${BOLD}Next steps:${NC}"
