@@ -61,11 +61,26 @@ Los hooks se instalan globalmente en `~/.claude/settings.json` y corren en TODA 
 
 | Evento | Accion |
 |--------|--------|
-| **SessionStart** | Inicia timer en Toggl (descripcion = branch actual) + log de sesion |
-| **Stop** | Registra actividad en el session logger |
-| **SessionEnd** | Para timer en Toggl + log de cierre de sesion |
+| **SessionStart** | Log de inicio de sesion |
+| **Stop** | Registra actividad (cada respuesta de Claude) |
+| **SessionEnd** | Log de cierre de sesion |
+
+Los hooks solo registran session logs. El timer de Toggl lo maneja Claude via la skill `worklog-tracker` con supervision del dev.
 
 Para remover: `scripts/setup-global-hooks.sh --remove`
+
+## Skill de Toggl (opcional)
+
+Para que Claude maneje el timer de Toggl con contexto (sugiere iniciar/parar, consulta antes de actuar):
+
+1. Copia `skills/worklog-tracker/SKILL.md` a `~/.claude/skills/worklog-tracker/SKILL.md`
+2. Agrega en tu `~/.claude/CLAUDE.md` la referencia a la skill:
+
+```markdown
+| Session start, resume, commit, push, time tracking, toggl, tempo, horas | `~/.claude/skills/worklog-tracker/SKILL.md` |
+```
+
+Sin la skill, igual podes usar las tools de Toggl manualmente pidiendole a Claude.
 
 ## MCP Client Config
 
