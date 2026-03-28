@@ -118,6 +118,15 @@ export class TogglTempoAdapter {
     );
   }
 
+  async getCurrentTimer(): Promise<{ id: number; description: string } | null> {
+    const current = await this.request<{ id?: number; description?: string } | null>(
+      "/me/time_entries/current",
+      { method: "GET" }
+    );
+    if (!current?.id) return null;
+    return { id: current.id, description: current.description ?? "" };
+  }
+
   async readTrackingData(input: ReadTrackingDataInput): Promise<unknown> {
     if (this.client?.readTrackingData) {
       return this.client.readTrackingData({

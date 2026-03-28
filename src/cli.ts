@@ -62,6 +62,16 @@ async function runTimerCommand(flags: string[]): Promise<void> {
   const env = loadAndValidateEnv();
   const adapter = await TogglTempoAdapter.create(env.togglApiToken, appConfig);
 
+  // Skip starting if there's already a running timer with the same description
+  if (input.action === "start") {
+    const current = await adapter.getCurrentTimer();
+    if (current?.description === input.description) {
+      process.stdout.write(`Timer already running: ${input.description}\n`);
+      process.stdout.write(`${JSON.stringify(current)}\n`);
+      return;
+    }
+  }
+
   const result = await adapter.smartTimerControl(input);
 
   if (input.action === "start") {
