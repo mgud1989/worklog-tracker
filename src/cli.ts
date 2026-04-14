@@ -1,12 +1,15 @@
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { loadAndValidateEnv, loadMcpConfig } from "./config.js";
+import { ActivityTracker } from "./activity-tracker.js";
+import { loadAndValidateEnv, loadMcpConfig, resolveConfigPath } from "./config.js";
+import { buildNudge } from "./nudge.js";
 import { parseSessionLogs } from "./session-log-parser.js";
 import {
   consolidateSessions,
   buildPushPreview,
   filterAlreadyPushed,
 } from "./session-consolidator.js";
+import { StateManager } from "./state-manager.js";
 import { TempoJiraAdapter } from "./tempo-jira-adapter.js";
 import { TogglTempoAdapter } from "./toggl-tempo-adapter.js";
 import type { SmartTimerControlInput, TempoPushResult } from "./types.js";
@@ -14,7 +17,9 @@ import type { SmartTimerControlInput, TempoPushResult } from "./types.js";
 const USAGE = `Usage:
   node dist/cli.js timer start --description "PROJ-123 working" [--project NAME] [--tags tag1,tag2]
   node dist/cli.js timer stop
-  node dist/cli.js tempo push [--date today|YYYY-MM-DD] [--from YYYY-MM-DD --to YYYY-MM-DD] [--dry-run]`;
+  node dist/cli.js timer status
+  node dist/cli.js tempo push [--date today|YYYY-MM-DD] [--from YYYY-MM-DD --to YYYY-MM-DD] [--dry-run]
+  node dist/cli.js nudge-check`;
 
 // ─── Timer Command ──────────────────────────────────────────────────────
 
@@ -58,8 +63,14 @@ function parseTimerArgs(flags: string[]): SmartTimerControlInput {
 async function runTimerCommand(flags: string[]): Promise<void> {
   const input = parseTimerArgs(flags);
 
-  const appConfig = loadMcpConfig(process.env.MCP_CONFIG_PATH);
+  const appConfig = loadMcpConfig(resolveConfigPath());
   const env = loadAndValidateEnv();
+
+  if (!env.togglApiToken) {
+    process.stderr.write("Toggl not configured. Set TOGGL_API_TOKEN in .env\n");
+    process.exit(1);
+  }
+
   const adapter = await TogglTempoAdapter.create(env.togglApiToken, appConfig);
 
   // Skip starting if there's already a running timer with the same description
@@ -81,6 +92,64 @@ async function runTimerCommand(flags: string[]): Promise<void> {
   }
 
   process.stdout.write(`${JSON.stringify(result)}\n`);
+}
+
+// ─── Timer Status Command ───────────────────────────────────────────────
+
+function formatElapsed(startIso: string): string {
+  const elapsed = Math.floor((Date.now() - new Date(startIso).getTime()) / 1000);
+  if (elapsed < 60) return `${elapsed}s`;
+  const minutes = Math.floor(elapsed / 60);
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  const remainingMinutes = minutes % 60;
+  return `${hours}h ${remainingMinutes}m`;
+}
+
+function formatTime(isoString: string): string {
+  const d = new Date(isoString);
+  return d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+}
+
+async function runTimerStatusCommand(): Promise<void> {
+  const appConfig = loadMcpConfig(resolveConfigPath());
+  const env = loadAndValidateEnv();
+
+  if (!env.togglApiToken) {
+    process.stderr.write("Toggl not configured. Set TOGGL_API_TOKEN in .env\n");
+    process.exit(1);
+  }
+
+  const adapter = await TogglTempoAdapter.create(env.togglApiToken, appConfig);
+
+  let current: Awaited<ReturnType<typeof adapter.getCurrentTimer>>;
+  try {
+    current = await adapter.getCurrentTimer();
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    process.stderr.write(`\u2717 Failed to fetch timer status: ${reason}\n`);
+    process.exit(1);
+  }
+
+  if (!current) {
+    process.stdout.write("\u25CB No timer running\n");
+    return;
+  }
+
+  let projectName = "-";
+  if (current.project_id) {
+    projectName = (await adapter.getProjectNameById(current.project_id)) ?? "-";
+  }
+
+  const tags = current.tags.length > 0 ? current.tags.join(", ") : "-";
+  const elapsed = current.start ? formatElapsed(current.start) : "-";
+  const startTime = current.start ? formatTime(current.start) : "-";
+
+  process.stdout.write(`\u25B6 Running: ${current.description || "(no description)"}\n`);
+  process.stdout.write(`  Started:  ${startTime} (${elapsed} ago)\n`);
+  process.stdout.write(`  Project:  ${projectName}\n`);
+  process.stdout.write(`  Tags:     ${tags}\n`);
+  process.stdout.write(`  ID:       ${current.id}\n`);
 }
 
 // ─── Tempo Push Command ─────────────────────────────────────────────────
@@ -236,7 +305,7 @@ async function runTempoPushCommand(flags: string[]): Promise<void> {
   const { from, to } = resolveDateRange(pushFlags);
 
   const logDir = resolveLogDir();
-  const appConfig = loadMcpConfig(process.env.MCP_CONFIG_PATH);
+  const appConfig = loadMcpConfig(resolveConfigPath());
   const env = loadAndValidateEnv();
 
   if (!env.tempoJiraConfig) {
@@ -350,16 +419,64 @@ async function runTempoPushCommand(flags: string[]): Promise<void> {
   }
 }
 
+// ─── Nudge Check Command ────────────────────────────────────────────────
+// Invoked from the UserPromptSubmit Claude Code hook. Whatever this writes to
+// stdout is injected into the agent's context for the current user turn.
+//
+// Design rules:
+//   - Fast and silent on the common path (no nudge → no stdout).
+//   - Never throws / never exits non-zero: a broken nudge must NEVER block the
+//     user's prompt from reaching the agent.
+//   - Uses a persistent cross-process cooldown (StateManager.canNudge) because
+//     each hook invocation is a fresh process — no in-memory tracker survives.
+
+async function runNudgeCheckCommand(): Promise<void> {
+  try {
+    const appConfig = loadMcpConfig(resolveConfigPath());
+
+    if (!appConfig.nudge.enabled) return;
+
+    const stateDir = resolveLogDir();
+    const stateManager = new StateManager(stateDir);
+
+    if (!stateManager.canNudge(appConfig.nudge.cooldownMinutes)) return;
+
+    // buildNudge expects a tracker in its context but doesn't actually consume it.
+    // Pass a throwaway instance to satisfy the type.
+    const tracker = new ActivityTracker();
+
+    const nudge = buildNudge({
+      sessionId: "hook",
+      tracker,
+      stateManager,
+      timezone: appConfig.timezone,
+      sessionLogDir: stateDir,
+      nudgeConfig: appConfig.nudge,
+    });
+
+    if (nudge) {
+      process.stdout.write(`${nudge.trimStart()}\n`);
+      stateManager.recordNudge();
+    }
+  } catch {
+    // Swallow everything. The hook must never block the user's prompt.
+  }
+}
+
 // ─── Main Routing ───────────────────────────────────────────────────────
 
 async function main() {
   const args = process.argv.slice(2);
   const command = args[0];
 
-  if (command === "timer") {
+  if (command === "timer" && args[1] === "status") {
+    await runTimerStatusCommand();
+  } else if (command === "timer") {
     await runTimerCommand(args.slice(1));
   } else if (command === "tempo" && args[1] === "push") {
     await runTempoPushCommand(args.slice(2));
+  } else if (command === "nudge-check") {
+    await runNudgeCheckCommand();
   } else {
     process.stderr.write(`Unknown command: ${args.join(" ") || "(none)"}\n\n${USAGE}\n`);
     process.exit(1);

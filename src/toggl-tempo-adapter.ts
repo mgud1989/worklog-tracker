@@ -118,13 +118,40 @@ export class TogglTempoAdapter {
     );
   }
 
-  async getCurrentTimer(): Promise<{ id: number; description: string } | null> {
-    const current = await this.request<{ id?: number; description?: string } | null>(
-      "/me/time_entries/current",
-      { method: "GET" }
-    );
+  async getCurrentTimer(): Promise<{
+    id: number;
+    description: string;
+    start: string;
+    project_id: number | null;
+    tags: string[];
+  } | null> {
+    const current = await this.request<{
+      id?: number;
+      description?: string;
+      start?: string;
+      project_id?: number | null;
+      tags?: string[];
+    } | null>("/me/time_entries/current", { method: "GET" });
     if (!current?.id) return null;
-    return { id: current.id, description: current.description ?? "" };
+    return {
+      id: current.id,
+      description: current.description ?? "",
+      start: current.start ?? "",
+      project_id: current.project_id ?? null,
+      tags: current.tags ?? [],
+    };
+  }
+
+  async getProjectNameById(projectId: number): Promise<string | null> {
+    try {
+      const project = await this.request<{ id: number; name: string }>(
+        `/workspaces/${this.appConfig.workspaceId}/projects/${projectId}`,
+        { method: "GET" }
+      );
+      return project.name;
+    } catch {
+      return null;
+    }
   }
 
   async readTrackingData(input: ReadTrackingDataInput): Promise<unknown> {

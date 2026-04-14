@@ -17,6 +17,7 @@ PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 # ── Paths ────────────────────────────────────────────────────────────────────
 CLAUDE_SETTINGS="$HOME/.claude/settings.json"
 SESSION_LOGGER="$PROJECT_DIR/session-logger/session-logger.sh"
+NUDGE_CLI="node $PROJECT_DIR/dist/cli.js nudge-check"
 
 # ── Check for jq ─────────────────────────────────────────────────────────────
 if ! command -v jq &>/dev/null; then
@@ -25,18 +26,22 @@ if ! command -v jq &>/dev/null; then
 fi
 
 # ── Remove mode ──────────────────────────────────────────────────────────────
+# Removes BOTH the session-logger hooks AND the worklog-tracker nudge hook.
 if [[ "${1:-}" == "--remove" ]]; then
   if [[ ! -f "$CLAUDE_SETTINGS" ]]; then
     echo "Nothing to remove: $CLAUDE_SETTINGS not found." >&2
     exit 0
   fi
-  echo "Removing session-logger hooks from $CLAUDE_SETTINGS..."
+  echo "Removing worklog-tracker hooks from $CLAUDE_SETTINGS..."
 
-  jq --arg marker "session-logger.sh" '
+  # is_wt_hook takes its input via pipe (`.` = the command string) rather than
+  # as a named parameter — jq requires parameterless defs when used with `|`.
+  if ! jq '
+    def is_wt_hook: contains("session-logger.sh") or contains("dist/cli.js nudge-check");
     if .hooks then
       .hooks |= with_entries(
         .value |= map(
-          .hooks |= map(select(.command | contains($marker) | not))
+          .hooks |= map(select(.command | is_wt_hook | not))
         )
         | .value |= map(select(.hooks | length > 0))
       )
@@ -46,10 +51,14 @@ if [[ "${1:-}" == "--remove" ]]; then
         end
     else .
     end
-  ' "$CLAUDE_SETTINGS" > "${CLAUDE_SETTINGS}.tmp" \
-    && mv "${CLAUDE_SETTINGS}.tmp" "$CLAUDE_SETTINGS"
+  ' "$CLAUDE_SETTINGS" > "${CLAUDE_SETTINGS}.tmp"; then
+    rm -f "${CLAUDE_SETTINGS}.tmp"
+    echo "ERROR: jq failed to process $CLAUDE_SETTINGS — file untouched." >&2
+    exit 1
+  fi
+  mv "${CLAUDE_SETTINGS}.tmp" "$CLAUDE_SETTINGS"
 
-  echo "Done. Session-logger hooks removed (other hooks preserved)."
+  echo "Done. Worklog-tracker hooks removed (other hooks preserved)."
   exit 0
 fi
 
@@ -65,26 +74,36 @@ if [[ ! -f "$CLAUDE_SETTINGS" ]]; then
   exit 1
 fi
 
-# ── Build hooks (session-logger only) ────────────────────────────────────────
+# ── Build hooks (session-logger + nudge hook) ────────────────────────────────
+# UserPromptSubmit runs on every prompt the dev sends and its stdout is injected
+# into the agent's context — that's what guarantees the nudge is delivered even
+# when the agent never calls a worklog-tracker MCP tool.
 HOOKS_JSON=$(cat <<ENDJSON
 {
-  "SessionStart": [ { "hooks": [ { "type": "command", "command": "$SESSION_LOGGER start" } ] } ],
-  "Stop": [ { "hooks": [ { "type": "command", "command": "$SESSION_LOGGER activity" } ] } ],
-  "SessionEnd": [ { "hooks": [ { "type": "command", "command": "$SESSION_LOGGER stop" } ] } ]
+  "SessionStart":     [ { "hooks": [ { "type": "command", "command": "$SESSION_LOGGER start" } ] } ],
+  "Stop":             [ { "hooks": [ { "type": "command", "command": "$SESSION_LOGGER activity" } ] } ],
+  "SessionEnd":       [ { "hooks": [ { "type": "command", "command": "$SESSION_LOGGER stop" } ] } ],
+  "UserPromptSubmit": [ { "hooks": [ { "type": "command", "command": "$NUDGE_CLI" } ] } ]
 }
 ENDJSON
 )
 
 # ── Merge into settings.json ────────────────────────────────────────────────
-echo "Installing session-logger hooks into $CLAUDE_SETTINGS..."
+echo "Installing worklog-tracker hooks into $CLAUDE_SETTINGS..."
 
-jq --argjson hooks "$HOOKS_JSON" '.hooks = $hooks' "$CLAUDE_SETTINGS" > "${CLAUDE_SETTINGS}.tmp" \
-  && mv "${CLAUDE_SETTINGS}.tmp" "$CLAUDE_SETTINGS"
+if ! jq --argjson hooks "$HOOKS_JSON" '.hooks = $hooks' "$CLAUDE_SETTINGS" > "${CLAUDE_SETTINGS}.tmp"; then
+  rm -f "${CLAUDE_SETTINGS}.tmp"
+  echo "ERROR: jq failed to process $CLAUDE_SETTINGS — file untouched." >&2
+  exit 1
+fi
+mv "${CLAUDE_SETTINGS}.tmp" "$CLAUDE_SETTINGS"
 
 echo ""
 echo "Hooks installed globally:"
-echo "  session-logger: $SESSION_LOGGER"
+echo "  session-logger:    $SESSION_LOGGER"
+echo "  nudge-check:       $NUDGE_CLI"
 echo ""
 echo "Session logs run on ALL Claude Code sessions."
 echo "Toggl timer is managed by Claude via worklog-tracker skill."
+echo "Nudges run on every user prompt (with cross-process cooldown)."
 echo "To remove: $0 --remove"

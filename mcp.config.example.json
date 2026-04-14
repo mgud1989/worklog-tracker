@@ -3,5 +3,11 @@
   "timezone": "America/Argentina/Buenos_Aires",
   "mode": "both",
   "defaultIssueKey": "HORAS-1",
-  "defaultWorkAttributes": "Desarrollo e Implementacion"
+  "defaultWorkAttributes": "Desarrollo e Implementacion",
+  "nudge": {
+    "enabled": true,
+    "cooldownMinutes": 30,
+    "pushReminderAfterHours": 4,
+    "endOfDayHour": 19
+  }
 }

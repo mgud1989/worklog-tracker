@@ -62,6 +62,13 @@ export type TempoJiraConfig = {
   jiraTempoAccountCustomFieldId?: string;
 };
 
+export type NudgeConfig = {
+  enabled: boolean;
+  cooldownMinutes: number;
+  pushReminderAfterHours: number;
+  endOfDayHour: number;
+};
+
 export type AppConfig = {
   workspaceId: string;
   timezone: string;
@@ -69,6 +76,7 @@ export type AppConfig = {
   defaultWorkAttributes?: Array<{ key: string; value: string }>;
   mode: "toggl" | "tempo" | "both";
   inactivityThresholdMinutes: number;
+  nudge: NudgeConfig;
 };
 
 export type ToolResultPayload = {

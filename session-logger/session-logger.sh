@@ -35,6 +35,20 @@ log_entry() {
   echo "$(timestamp) - [${label}] - Branch: $(branch) - session: ${session}" >>"$LOG_FILE"
 }
 
+CLI="$SCRIPT_DIR/../dist/cli.js"
+
+# Fire-and-forget timer command. Logs stdout+stderr to toggl-errors.log.
+TOGGL_LOG="${LOG_DIR}/toggl-errors.log"
+
+toggl_timer() {
+  local action="$1"
+  shift
+  (
+    printf "[%s] [%s] " "$(timestamp)" "$action"
+    node "$CLI" timer "$action" "$@" 2>&1
+  ) >>"$TOGGL_LOG" 2>&1 &
+}
+
 # ── start / stop / activity ───────────────────────────────────────────────────
 if [[ "$ACTION" == "start" || "$ACTION" == "stop" || "$ACTION" == "activity" ]]; then
   INPUT=$(cat)
@@ -45,6 +59,13 @@ if [[ "$ACTION" == "start" || "$ACTION" == "stop" || "$ACTION" == "activity" ]];
   activity) LABEL="ACTIVITY" ;;
   esac
   log_entry "$LABEL" "$SESSION_ID"
+
+  # Toggl timer integration (fire-and-forget, non-blocking)
+  case "$ACTION" in
+  start) toggl_timer start --description "$(branch)" ;;
+  stop) toggl_timer stop ;;
+  esac
+
   exit 0
 fi
 
