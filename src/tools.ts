@@ -180,6 +180,7 @@ export const previewTempoPushSchema = z
 const consolidatedWorklogSchema = z.object({
   issueKey: z.string().min(1),
   branch: z.string().min(1),
+  folder: z.string().min(1).optional(),
   date: dateSchema,
   startTime: z.string().regex(/^\d{2}:\d{2}$/, "Expected HH:MM format"),
   durationHours: z.number().positive(),

@@ -97,6 +97,8 @@ export type LogEntry = {
   branch: string;
   sessionId: string;
   rawLine: string;
+  /** Repo folder name captured at hook-fire time. Undefined for pre-feature logs. */
+  folder?: string;
 };
 
 export type WorkWindow = {
@@ -105,6 +107,8 @@ export type WorkWindow = {
   branch: string;
   sessionId: string;
   durationMinutes: number;
+  /** Repo folder name propagated from entries. Undefined if the contributing entries had none. */
+  folder?: string;
 };
 
 export type ConsolidatedWorklog = {
@@ -116,6 +120,8 @@ export type ConsolidatedWorklog = {
   sessionIds: string[];
   windowCount: number;
   description: string;
+  /** Repo folder name (basename of git toplevel). Undefined for pre-feature logs. */
+  folder?: string;
 };
 
 export type PushPreview = {

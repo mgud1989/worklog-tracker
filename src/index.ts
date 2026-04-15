@@ -285,6 +285,10 @@ async function bootstrap() {
               properties: {
                 issueKey: { type: "string" },
                 branch: { type: "string" },
+                folder: {
+                  type: "string",
+                  description: "Optional repo folder name, captured at session-start. Used only for context."
+                },
                 date: { type: "string" },
                 startTime: { type: "string", description: "HH:MM — start time for the worklog" },
                 durationHours: { type: "number" },

@@ -274,7 +274,7 @@ function printPreviewTable(
   process.stdout.write("\n");
 
   // Table header
-  const header = padRow("Date", "Issue", "Branch", "Duration", "Sessions");
+  const header = padRow("Date", "Issue", "Folder", "Branch", "Duration", "Sessions");
   const separator = "-".repeat(header.length);
   process.stdout.write(`${header}\n${separator}\n`);
 
@@ -282,6 +282,7 @@ function printPreviewTable(
     const row = padRow(
       w.date,
       w.issueKey || "(unmapped)",
+      truncate(w.folder ?? "-", 18),
       truncate(w.branch, 30),
       formatHours(w.durationHours),
       String(w.sessionIds.length),
@@ -292,8 +293,15 @@ function printPreviewTable(
   process.stdout.write("\n");
 }
 
-function padRow(date: string, issue: string, branch: string, duration: string, sessions: string): string {
-  return `${date.padEnd(12)}${issue.padEnd(14)}${branch.padEnd(32)}${duration.padEnd(12)}${sessions}`;
+function padRow(
+  date: string,
+  issue: string,
+  folder: string,
+  branch: string,
+  duration: string,
+  sessions: string,
+): string {
+  return `${date.padEnd(12)}${issue.padEnd(14)}${folder.padEnd(20)}${branch.padEnd(32)}${duration.padEnd(12)}${sessions}`;
 }
 
 function truncate(str: string, maxLen: number): string {

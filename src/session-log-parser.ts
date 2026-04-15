@@ -2,8 +2,11 @@ import { readFileSync, existsSync } from "node:fs";
 import { join } from "node:path";
 import type { LogEntry, SessionLogLabel } from "./types.js";
 
+// Folder segment is optional to stay backward-compatible with logs written before
+// the folder-prefix feature. When present, the non-greedy capture stops at the
+// first " - Branch:" separator, so folder names containing " - " are safe.
 const LOG_LINE_REGEX =
-  /^(\d{2})-(\d{2})-(\d{4}) (\d{2}):(\d{2}):(\d{2}) - \[(START|STOP|ACTIVITY|INACTIVITY)\] - Branch: (.+) - session: (.*)$/;
+  /^(\d{2})-(\d{2})-(\d{4}) (\d{2}):(\d{2}):(\d{2}) - \[(START|STOP|ACTIVITY|INACTIVITY)\](?: - Folder: (.+?))? - Branch: (.+) - session: (.*)$/;
 
 const VALID_LABELS = new Set<SessionLogLabel>(["START", "STOP", "ACTIVITY", "INACTIVITY"]);
 
@@ -24,7 +27,7 @@ export function parseLogLine(line: string): LogEntry | null {
     return null;
   }
 
-  const [, day, month, year, hours, minutes, seconds, label, branch, sessionId] = match;
+  const [, day, month, year, hours, minutes, seconds, label, folder, branch, sessionId] = match;
 
   if (!VALID_LABELS.has(label as SessionLogLabel)) return null;
 
@@ -42,12 +45,15 @@ export function parseLogLine(line: string): LogEntry | null {
     return null;
   }
 
+  const trimmedFolder = folder?.trim();
+
   return {
     timestamp,
     label: label as SessionLogLabel,
     branch: branch.trim(),
     sessionId: sessionId.trim(),
     rawLine: trimmed,
+    ...(trimmedFolder ? { folder: trimmedFolder } : {}),
   };
 }
 

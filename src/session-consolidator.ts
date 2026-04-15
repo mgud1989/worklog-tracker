@@ -60,6 +60,35 @@ function computeWorkWindows(
   let windowStart: Date | null = null;
   let windowEnd: Date | null = null;
   let windowBranch: string | null = null;
+  let windowFolder: string | undefined;
+
+  const emitWindow = (): void => {
+    if (windowStart === null || windowEnd === null || windowBranch === null) return;
+    const durationMinutes = (windowEnd.getTime() - windowStart.getTime()) / (60 * 1000);
+    if (durationMinutes < MINIMUM_WINDOW_MINUTES) return;
+    windows.push({
+      start: windowStart,
+      end: windowEnd,
+      branch: windowBranch,
+      sessionId,
+      durationMinutes: Math.round(durationMinutes * 100) / 100,
+      ...(windowFolder ? { folder: windowFolder } : {}),
+    });
+  };
+
+  const openWindow = (entry: LogEntry): void => {
+    windowStart = entry.timestamp;
+    windowEnd = entry.timestamp;
+    windowBranch = entry.branch;
+    windowFolder = entry.folder;
+  };
+
+  const resetWindow = (): void => {
+    windowStart = null;
+    windowEnd = null;
+    windowBranch = null;
+    windowFolder = undefined;
+  };
 
   for (const entry of activityEntries) {
     if (entry.label === "STOP") {
@@ -70,21 +99,8 @@ function computeWorkWindows(
           // STOP is within threshold — extend to STOP
           windowEnd = entry.timestamp;
         }
-        // Emit the window either way
-        const durationMinutes =
-          (windowEnd.getTime() - windowStart.getTime()) / (60 * 1000);
-        if (durationMinutes >= MINIMUM_WINDOW_MINUTES) {
-          windows.push({
-            start: windowStart,
-            end: windowEnd,
-            branch: windowBranch!,
-            sessionId,
-            durationMinutes: Math.round(durationMinutes * 100) / 100,
-          });
-        }
-        windowStart = null;
-        windowEnd = null;
-        windowBranch = null;
+        emitWindow();
+        resetWindow();
       }
       continue;
     }
@@ -93,9 +109,7 @@ function computeWorkWindows(
       // START can open a pending window — but only counts if ACTIVITY follows within threshold
       // We just record it as potential start; next ACTIVITY will confirm or discard
       if (windowStart === null) {
-        windowStart = entry.timestamp;
-        windowEnd = entry.timestamp;
-        windowBranch = entry.branch;
+        openWindow(entry);
       }
       continue;
     }
@@ -103,30 +117,18 @@ function computeWorkWindows(
     // entry.label === "ACTIVITY"
     if (windowStart === null) {
       // First activity — open a new window
-      windowStart = entry.timestamp;
-      windowEnd = entry.timestamp;
-      windowBranch = entry.branch;
+      openWindow(entry);
       continue;
     }
 
     const gap = entry.timestamp.getTime() - windowEnd!.getTime();
 
-    // Branch switch: close current window, open new one
-    if (entry.branch !== windowBranch) {
-      const durationMinutes =
-        (windowEnd!.getTime() - windowStart.getTime()) / (60 * 1000);
-      if (durationMinutes >= MINIMUM_WINDOW_MINUTES) {
-        windows.push({
-          start: windowStart,
-          end: windowEnd!,
-          branch: windowBranch!,
-          sessionId,
-          durationMinutes: Math.round(durationMinutes * 100) / 100,
-        });
-      }
-      windowStart = entry.timestamp;
-      windowEnd = entry.timestamp;
-      windowBranch = entry.branch;
+    // Branch or folder switch: close current window, open new one.
+    // Folder switch is defensive — a Claude session can in principle change cwd,
+    // and mixing folders in one window would give a wrong bucket downstream.
+    if (entry.branch !== windowBranch || entry.folder !== windowFolder) {
+      emitWindow();
+      openWindow(entry);
       continue;
     }
 
@@ -135,37 +137,13 @@ function computeWorkWindows(
       windowEnd = entry.timestamp;
     } else {
       // Gap exceeds threshold — close current window, open new one
-      const durationMinutes =
-        (windowEnd!.getTime() - windowStart.getTime()) / (60 * 1000);
-      if (durationMinutes >= MINIMUM_WINDOW_MINUTES) {
-        windows.push({
-          start: windowStart,
-          end: windowEnd!,
-          branch: windowBranch!,
-          sessionId,
-          durationMinutes: Math.round(durationMinutes * 100) / 100,
-        });
-      }
-      windowStart = entry.timestamp;
-      windowEnd = entry.timestamp;
-      windowBranch = entry.branch;
+      emitWindow();
+      openWindow(entry);
     }
   }
 
   // Emit trailing open window (orphaned session — no STOP)
-  if (windowStart !== null && windowEnd !== null) {
-    const durationMinutes =
-      (windowEnd.getTime() - windowStart.getTime()) / (60 * 1000);
-    if (durationMinutes >= MINIMUM_WINDOW_MINUTES) {
-      windows.push({
-        start: windowStart,
-        end: windowEnd,
-        branch: windowBranch!,
-        sessionId,
-        durationMinutes: Math.round(durationMinutes * 100) / 100,
-      });
-    }
-  }
+  emitWindow();
 
   return windows;
 }
@@ -242,12 +220,14 @@ export function consolidateSessions(
   // Split cross-midnight windows
   allWindows = splitCrossMidnightWindows(allWindows);
 
-  // Consolidate by (date, branch)
-  type BucketKey = string; // "YYYY-MM-DD|branch"
+  // Consolidate by (date, folder, branch). Folder is part of the key so two repos
+  // sharing the same branch name (e.g. `main`) don't get merged into one worklog.
+  type BucketKey = string; // "YYYY-MM-DD|folder|branch"
   const buckets = new Map<
     BucketKey,
     {
       branch: string;
+      folder?: string;
       date: string;
       totalMinutes: number;
       sessionIds: Set<string>;
@@ -258,10 +238,11 @@ export function consolidateSessions(
 
   for (const w of allWindows) {
     const date = getDateString(w.start);
-    const key = `${date}|${w.branch}`;
+    const key = `${date}|${w.folder ?? ""}|${w.branch}`;
 
     const bucket = buckets.get(key) ?? {
       branch: w.branch,
+      folder: w.folder,
       date,
       totalMinutes: 0,
       sessionIds: new Set<string>(),
@@ -285,6 +266,7 @@ export function consolidateSessions(
     const issueKey = extractIssueKey(bucket.branch, options.defaultIssueKey);
     const sessionMarkers = sessionIds.map((id) => `[session:${id}]`).join(" ");
     const durationHours = Math.round((bucket.totalMinutes / 60) * 100) / 100;
+    const prefix = bucket.folder ? `[${bucket.folder}] ` : "";
 
     worklogs.push({
       issueKey: issueKey ?? "",
@@ -294,12 +276,18 @@ export function consolidateSessions(
       durationHours,
       sessionIds,
       windowCount: bucket.windowCount,
-      description: `${bucket.branch} ${sessionMarkers}`,
+      description: `${prefix}${bucket.branch} ${sessionMarkers}`,
+      ...(bucket.folder ? { folder: bucket.folder } : {}),
     });
   }
 
-  // Sort by date then branch for deterministic output
-  worklogs.sort((a, b) => a.date.localeCompare(b.date) || a.branch.localeCompare(b.branch));
+  // Sort by date, folder, then branch for deterministic output
+  worklogs.sort(
+    (a, b) =>
+      a.date.localeCompare(b.date) ||
+      (a.folder ?? "").localeCompare(b.folder ?? "") ||
+      a.branch.localeCompare(b.branch),
+  );
 
   return worklogs;
 }
