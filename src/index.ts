@@ -8,9 +8,7 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import { dirname, resolve } from "node:path";
 import { ZodError } from "zod";
-import { ActivityTracker } from "./activity-tracker.js";
 import { loadAndValidateEnv, loadMcpConfig } from "./config.js";
-import { buildNudge } from "./nudge.js";
 import { consolidateSessions, buildPushPreview, filterAlreadyPushed } from "./session-consolidator.js";
 import { parseSessionLogs } from "./session-log-parser.js";
 import { StateManager } from "./state-manager.js";
@@ -61,12 +59,6 @@ function resolveDateInput(input: { date?: string; from?: string; to?: string }):
   return { from: input.from!, to: input.to! };
 }
 
-// ─── CallToolResult type (matches MCP SDK response shape) ─────────────
-type CallToolResult = {
-  content: Array<{ type: string; text: string }>;
-  structuredContent?: unknown;
-};
-
 async function bootstrap() {
   const appConfig = loadMcpConfig(process.env.MCP_CONFIG_PATH);
   const env = loadAndValidateEnv();
@@ -77,49 +69,9 @@ async function bootstrap() {
     ? new TempoJiraAdapter(env.tempoJiraConfig, appConfig.timezone)
     : null;
 
-  // ─── Nudge system initialization ──────────────────────────────────
   const sessionLogDir = resolveSessionLogDir();
   const stateManager = new StateManager(sessionLogDir);
-  const tracker = new ActivityTracker(appConfig.nudge.cooldownMinutes);
   stateManager.load(); // Initial load to validate/create state file
-
-  /**
-   * Wrap a tool result with a potential nudge message.
-   * Completely transparent: if anything fails, the original result is returned as-is.
-   */
-  function withNudge(result: CallToolResult, sessionId: string): CallToolResult {
-    try {
-      tracker.recordToolCall(sessionId);
-
-      if (!tracker.canNudge(sessionId)) return result;
-
-      const nudge = buildNudge({
-        sessionId,
-        tracker,
-        stateManager,
-        timezone: appConfig.timezone,
-        sessionLogDir,
-        nudgeConfig: appConfig.nudge,
-      });
-
-      if (!nudge) return result;
-
-      tracker.recordNudge(sessionId);
-
-      // Append nudge text to the first text content block
-      const content = result.content.map((block, index) => {
-        if (index === 0 && block.type === "text") {
-          return { ...block, text: block.text + nudge };
-        }
-        return block;
-      });
-
-      return { ...result, content };
-    } catch {
-      // Nudge system must never break tool responses
-      return result;
-    }
-  }
 
   const server = new Server(
     {
@@ -428,11 +380,6 @@ async function bootstrap() {
     const name = request.params.name;
     const args = request.params.arguments;
 
-    // Extract session ID from MCP request metadata, fall back to default
-    const meta = request.params._meta as Record<string, unknown> | undefined;
-    const sessionId = (typeof meta?.sessionId === "string" ? meta.sessionId : null)
-      ?? "default-session";
-
     try {
       if (name === "log_work_entry") {
         if (!togglAdapter) {
@@ -441,7 +388,7 @@ async function bootstrap() {
         const input = parseLogWorkEntry(args);
         const result = await togglAdapter.logWorkEntry(input);
 
-        return withNudge(buildToolResponse({
+        return buildToolResponse({
           ok: true,
           action: name,
           workspaceId: appConfig.workspaceId,
@@ -450,7 +397,7 @@ async function bootstrap() {
             input,
             providerResult: result
           }
-        }), sessionId);
+        });
       }
 
       if (name === "smart_timer_control") {
@@ -460,7 +407,7 @@ async function bootstrap() {
         const input = parseSmartTimerControl(args);
         const result = await togglAdapter.smartTimerControl(input);
 
-        return withNudge(buildToolResponse({
+        return buildToolResponse({
           ok: true,
           action: `${name}:${input.action}`,
           workspaceId: appConfig.workspaceId,
@@ -469,7 +416,7 @@ async function bootstrap() {
             input,
             providerResult: result
           }
-        }), sessionId);
+        });
       }
 
       if (name === "read_tracking_data") {
@@ -479,7 +426,7 @@ async function bootstrap() {
         const input = parseReadTrackingData(args);
         const result = await togglAdapter.readTrackingData(input);
 
-        return withNudge(buildToolResponse({
+        return buildToolResponse({
           ok: true,
           action: name,
           workspaceId: appConfig.workspaceId,
@@ -488,7 +435,7 @@ async function bootstrap() {
             input,
             providerResult: result
           }
-        }), sessionId);
+        });
       }
 
       if (name === "update_work_entry") {
@@ -498,7 +445,7 @@ async function bootstrap() {
         const input = parseUpdateWorkEntry(args);
         const result = await togglAdapter.updateWorkEntry(input);
 
-        return withNudge(buildToolResponse({
+        return buildToolResponse({
           ok: true,
           action: name,
           workspaceId: appConfig.workspaceId,
@@ -507,7 +454,7 @@ async function bootstrap() {
             input,
             providerResult: result
           }
-        }), sessionId);
+        });
       }
 
       if (name === "tempo_create_worklog") {
@@ -521,7 +468,7 @@ async function bootstrap() {
         const input = parseTempoCreateWorklog(args);
         const result = await tempoJiraAdapter.createWorklog(input);
 
-        return withNudge(buildToolResponse({
+        return buildToolResponse({
           ok: true,
           action: name,
           workspaceId: appConfig.workspaceId,
@@ -530,7 +477,7 @@ async function bootstrap() {
             input,
             providerResult: result
           }
-        }), sessionId);
+        });
       }
 
       if (name === "tempo_read_worklogs") {
@@ -544,7 +491,7 @@ async function bootstrap() {
         const input = parseTempoReadWorklogs(args);
         const result = await tempoJiraAdapter.readWorklogs(input);
 
-        return withNudge(buildToolResponse({
+        return buildToolResponse({
           ok: true,
           action: name,
           workspaceId: appConfig.workspaceId,
@@ -553,7 +500,7 @@ async function bootstrap() {
             input,
             providerResult: result
           }
-        }), sessionId);
+        });
       }
 
       if (name === "sync_toggl_range_to_tempo") {
@@ -596,7 +543,7 @@ async function bootstrap() {
           // Don't break the response if state recording fails
         }
 
-        return withNudge(buildToolResponse({
+        return buildToolResponse({
           ok: true,
           action: name,
           workspaceId: appConfig.workspaceId,
@@ -606,7 +553,7 @@ async function bootstrap() {
             effectiveInput,
             providerResult: syncResult
           }
-        }), sessionId);
+        });
       }
 
       if (name === "preview_tempo_push") {
@@ -641,7 +588,7 @@ async function bootstrap() {
 
         const preview = buildPushPreview(toPush);
 
-        return withNudge(buildToolResponse({
+        return buildToolResponse({
           ok: true,
           action: name,
           workspaceId: appConfig.workspaceId,
@@ -652,7 +599,7 @@ async function bootstrap() {
             alreadyPushedCount,
             preview,
           },
-        }), sessionId);
+        });
       }
 
       if (name === "push_tempo_worklogs") {
@@ -715,7 +662,7 @@ async function bootstrap() {
           }
         }
 
-        return withNudge(buildToolResponse({
+        return buildToolResponse({
           ok: failed === 0,
           action: name,
           workspaceId: appConfig.workspaceId,
@@ -726,7 +673,7 @@ async function bootstrap() {
             total: results.length,
             results,
           },
-        }), sessionId);
+        });
       }
 
       if (name === "tempo_delete_worklog") {
@@ -744,7 +691,7 @@ async function bootstrap() {
 
         await tempoJiraAdapter.deleteWorklog(tempoWorklogId);
 
-        return withNudge(buildToolResponse({
+        return buildToolResponse({
           ok: true,
           action: name,
           workspaceId: appConfig.workspaceId,
@@ -752,7 +699,7 @@ async function bootstrap() {
           details: {
             deleted: tempoWorklogId,
           },
-        }), sessionId);
+        });
       }
 
       throw new McpError(ErrorCode.MethodNotFound, `Unknown tool: ${name}`);

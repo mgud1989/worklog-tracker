@@ -141,9 +141,6 @@ export class StateManager {
   /**
    * Cross-process nudge cooldown check. Returns true if enough time has passed
    * since the last delivered nudge (or if no nudge has ever been delivered).
-   *
-   * Used by the UserPromptSubmit hook CLI path, where each invocation is a fresh
-   * process — so the in-memory ActivityTracker cooldown can't apply.
    */
   canNudge(cooldownMinutes: number): boolean {
     const state = this.load();

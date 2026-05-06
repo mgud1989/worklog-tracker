@@ -37,7 +37,6 @@ It is intended for engineering teams where worklog integrity affects billing and
   - MCP bootstrap (stdio transport)
   - Tool catalog definition gated by `mode` and available adapters
   - Tool routing, error mapping (Zod → `McpError`)
-  - Wraps tool responses with `withNudge()` to inject reminders into the agent's context
 
 - `src/cli.ts`
   - Subcommands: `timer start|stop|status`, `tempo push`, `nudge-check`
@@ -80,15 +79,12 @@ It is intended for engineering teams where worklog integrity affects billing and
   - Persists `session-logger/.session-logs/.state.json` with pushed sessionIds + last nudge timestamp
   - Cross-process — used by both the MCP server and the `nudge-check` hook (which is a fresh process every prompt)
 
-### Activity / Nudge
-
-- `src/activity-tracker.ts`
-  - In-memory tool-call counter per session (used inside the MCP server only)
+### Nudge
 
 - `src/nudge.ts`
   - Builds nudge text from state + config (`pushReminderAfterHours`, `endOfDayHour`)
   - Returns `null` when nothing should be nudged
-  - Used both by `withNudge()` in MCP responses and by `nudge-check` CLI in the UserPromptSubmit hook
+  - Used by `nudge-check` CLI in the UserPromptSubmit hook
 
 ### Hooks layer
 
@@ -189,9 +185,8 @@ The catalog exposed to MCP clients depends on `mode` (in `mcp.config.json`) and 
 
 ### 4) Nudge delivery
 
-- **In-MCP-response path**: every tool response goes through `withNudge()`. If cooldown elapsed and a nudge condition is met, the nudge text is appended to the first text content block.
-- **Out-of-band path** (UserPromptSubmit hook): every user prompt triggers `node dist/cli.js nudge-check`. Its stdout is injected into the agent's context for that turn. Cross-process cooldown via `state-manager` prevents double-nudging.
-- The hook path guarantees delivery even when the agent never calls a worklog-tracker MCP tool that turn.
+- **UserPromptSubmit hook**: every user prompt triggers `node dist/cli.js nudge-check`. Its stdout is injected into the agent's context for that turn. Cross-process cooldown via `state-manager` (persisted in `.state.json`) prevents double-nudging.
+- This is the only delivery path: the hook guarantees delivery even when the agent never calls a worklog-tracker MCP tool that turn, so MCP tool responses are not wrapped.
 
 ## Configuration Model
 

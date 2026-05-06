@@ -1,4 +1,3 @@
-import type { ActivityTracker } from "./activity-tracker.js";
 import type { StateManager } from "./state-manager.js";
 import type { NudgeConfig } from "./types.js";
 import { parseSessionLogs } from "./session-log-parser.js";
@@ -6,8 +5,6 @@ import { parseSessionLogs } from "./session-log-parser.js";
 // ─── Types ────────────────────────────────────────────────────────────
 
 export interface NudgeContext {
-  sessionId: string;
-  tracker: ActivityTracker;
   stateManager: StateManager;
   timezone: string;
   sessionLogDir: string;

@@ -62,7 +62,7 @@ const nudgeConfigSchema = z.object({
   enabled: z.boolean().optional().default(true),
   cooldownMinutes: z.number().int().positive().optional().default(30),
   pushReminderAfterHours: z.number().positive().optional().default(4),
-  endOfDayHour: z.number().int().min(0).max(23).optional().default(17)
+  endOfDayHour: z.number().int().min(0).max(23).optional().default(19)
 }).optional().default({});
 
 const configSchema = z.object({
@@ -80,7 +80,7 @@ const configSchema = z.object({
       )
     ])
     .optional(),
-  mode: z.enum(["toggl", "tempo", "both"]).optional().default("toggl"),
+  mode: z.enum(["toggl", "tempo", "both"]).optional().default("tempo"),
   inactivityThresholdMinutes: z.number().int().positive().optional().default(10),
   nudge: nudgeConfigSchema
 });

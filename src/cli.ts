@@ -1,6 +1,5 @@
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { ActivityTracker } from "./activity-tracker.js";
 import { loadAndValidateEnv, loadMcpConfig, resolveConfigPath } from "./config.js";
 import { buildNudge } from "./nudge.js";
 import { parseSessionLogs } from "./session-log-parser.js";
@@ -435,8 +434,8 @@ async function runTempoPushCommand(flags: string[]): Promise<void> {
 //   - Fast and silent on the common path (no nudge → no stdout).
 //   - Never throws / never exits non-zero: a broken nudge must NEVER block the
 //     user's prompt from reaching the agent.
-//   - Uses a persistent cross-process cooldown (StateManager.canNudge) because
-//     each hook invocation is a fresh process — no in-memory tracker survives.
+//   - Cooldown is persisted via StateManager because each hook invocation is a
+//     fresh process and in-memory state would not survive between prompts.
 
 async function runNudgeCheckCommand(): Promise<void> {
   try {
@@ -449,13 +448,7 @@ async function runNudgeCheckCommand(): Promise<void> {
 
     if (!stateManager.canNudge(appConfig.nudge.cooldownMinutes)) return;
 
-    // buildNudge expects a tracker in its context but doesn't actually consume it.
-    // Pass a throwaway instance to satisfy the type.
-    const tracker = new ActivityTracker();
-
     const nudge = buildNudge({
-      sessionId: "hook",
-      tracker,
       stateManager,
       timezone: appConfig.timezone,
       sessionLogDir: stateDir,
