@@ -21,18 +21,19 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/_common.sh"
 
 CLI="$SCRIPT_DIR/../dist/cli.js"
-TOGGL_LOG="$SCRIPT_DIR/../.logs/toggl.log"
-mkdir -p "$(dirname "$TOGGL_LOG")"
+LOG_DIR="$SCRIPT_DIR/../.logs"
+TOGGL_LOG="$LOG_DIR/toggl-$(date +%Y-%m).log"
+mkdir -p "$LOG_DIR"
 
 # ── Fire-and-forget timer command ─────────────────────────────────────────────
-# Logs stdout+stderr to toggl.log (full audit trail — success and errors). Never blocks the hook.
+# Logs stdout+stderr to the monthly toggl-YYYY-MM.log (full audit trail). Never blocks the hook.
 toggl_timer() {
   local action="$1"
   shift
   (
     printf "[%s] [%s] " "$(timestamp)" "$action"
     node "$CLI" timer "$action" "$@" 2>&1
-  ) >>"$TOGGL_LOG" 2>&1 &
+  ) >>"$TOGGL_LOG" &
 }
 
 # ── start / stop ──────────────────────────────────────────────────────────────

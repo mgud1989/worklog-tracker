@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, writeFileSync, renameSync } from "node:fs";
+import { existsSync, readdirSync, rmSync, readFileSync, writeFileSync, renameSync } from "node:fs";
 import { join } from "node:path";
 
 // ─── Types ────────────────────────────────────────────────────────────
@@ -38,10 +38,14 @@ function getMonthFromDate(dateStr: string): string {
 export class StateManager {
   private readonly statePath: string;
   private readonly tmpPath: string;
+  private readonly dir: string;
+  private readonly logRetentionMonths: number;
 
-  constructor(stateDir: string) {
-    this.statePath = join(stateDir, ".state.json");
-    this.tmpPath = join(stateDir, ".state.json.tmp");
+  constructor(dir: string, logRetentionMonths = 3) {
+    this.dir = dir;
+    this.statePath = join(dir, ".state.json");
+    this.tmpPath = join(dir, ".state.json.tmp");
+    this.logRetentionMonths = logRetentionMonths;
   }
 
   /**
@@ -167,11 +171,54 @@ export class StateManager {
    * Since individual session IDs don't carry timestamps, we prune ALL
    * and reset. Worst case: a duplicate push attempt that Tempo rejects
    * via the [session:id] marker check.
+   *
+   * Also deletes old monthly log files (session-YYYY-MM.log, toggl-YYYY-MM.log)
+   * that fall outside the retention window. Legacy files without a YYYY-MM
+   * suffix (session.log, toggl.log) are never touched.
    */
   cleanup(state?: WorklogState): void {
     const current = state ?? this.load();
     current.pushedSessionIds = [];
     current.lastCleanedAt = new Date().toISOString().slice(0, 10);
     this.save(current);
+    this.pruneLogFiles();
+  }
+
+  private pruneLogFiles(): void {
+    if (!existsSync(this.dir)) return;
+
+    const now = new Date();
+    const currentYear = now.getFullYear();
+    const currentMonth = now.getMonth() + 1; // 1-based
+
+    let entries: string[];
+    try {
+      entries = readdirSync(this.dir);
+    } catch {
+      return;
+    }
+
+    const pattern = /^(session|toggl)-(\d{4})-(\d{2})\.log$/;
+
+    for (const entry of entries) {
+      const match = pattern.exec(entry);
+      if (!match) continue;
+
+      const fileYear = parseInt(match[2], 10);
+      const fileMonth = parseInt(match[3], 10);
+
+      // Month delta: positive means the file is older than current month
+      const monthsDelta =
+        (currentYear - fileYear) * 12 + (currentMonth - fileMonth);
+
+      if (monthsDelta >= this.logRetentionMonths) {
+        try {
+          rmSync(join(this.dir, entry));
+        } catch {
+          // Non-fatal — log to stderr and continue
+          console.error(`[state-manager] Could not delete log file: ${entry}`);
+        }
+      }
+    }
   }
 }

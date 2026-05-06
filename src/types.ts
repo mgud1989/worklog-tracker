@@ -76,6 +76,7 @@ export type AppConfig = {
   defaultWorkAttributes?: Array<{ key: string; value: string }>;
   mode: "toggl" | "tempo" | "both";
   inactivityThresholdMinutes: number;
+  logRetentionMonths: number;
   nudge: NudgeConfig;
 };
 

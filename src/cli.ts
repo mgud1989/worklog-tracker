@@ -444,7 +444,7 @@ async function runNudgeCheckCommand(): Promise<void> {
     if (!appConfig.nudge.enabled) return;
 
     const stateDir = resolveLogDir();
-    const stateManager = new StateManager(stateDir);
+    const stateManager = new StateManager(stateDir, appConfig.logRetentionMonths);
 
     if (!stateManager.canNudge(appConfig.nudge.cooldownMinutes)) return;
 

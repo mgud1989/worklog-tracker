@@ -70,7 +70,7 @@ async function bootstrap() {
     : null;
 
   const sessionLogDir = resolveSessionLogDir();
-  const stateManager = new StateManager(sessionLogDir);
+  const stateManager = new StateManager(sessionLogDir, appConfig.logRetentionMonths);
   stateManager.load(); // Initial load to validate/create state file
 
   const server = new Server(

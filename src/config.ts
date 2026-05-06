@@ -82,6 +82,7 @@ const configSchema = z.object({
     .optional(),
   mode: z.enum(["toggl", "tempo", "both"]).optional().default("tempo"),
   inactivityThresholdMinutes: z.number().int().positive().optional().default(10),
+  logRetentionMonths: z.number().int().min(1).optional().default(3),
   nudge: nudgeConfigSchema
 });
 
@@ -163,6 +164,13 @@ export function loadMcpConfig(configPathFromEnv?: string): AppConfig {
       ? [{ key: "_Tipotarea_", value: rawConfig.defaultWorkAttributes }]
       : rawConfig.defaultWorkAttributes;
 
+  const envRetention = process.env.WORKLOG_LOG_RETENTION_MONTHS;
+  const parsedRetention = envRetention ? parseInt(envRetention, 10) : NaN;
+  const logRetentionMonths =
+    !isNaN(parsedRetention) && parsedRetention > 0
+      ? parsedRetention
+      : rawConfig.logRetentionMonths;
+
   return {
     workspaceId: rawConfig.workspaceId,
     timezone: rawConfig.timezone,
@@ -170,6 +178,7 @@ export function loadMcpConfig(configPathFromEnv?: string): AppConfig {
     defaultWorkAttributes,
     mode: rawConfig.mode,
     inactivityThresholdMinutes: rawConfig.inactivityThresholdMinutes,
+    logRetentionMonths,
     nudge: {
       enabled: rawConfig.nudge.enabled,
       cooldownMinutes: rawConfig.nudge.cooldownMinutes,
