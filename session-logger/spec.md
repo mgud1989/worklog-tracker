@@ -15,13 +15,13 @@ No se requiere precisión del 100%.
 - Claude Code instalado
 - Node.js 20+
 - `jq` instalado (`brew install jq` en macOS, `apt install jq` en Ubuntu)
-- El MCP server de Toggl configurado y funcionando (ver `README.md` del proyecto raíz)
+- El MCP server worklog-tracker configurado y funcionando (ver `README.md` del proyecto raíz)
 
 ### 1. Clonar y buildear
 
 ```bash
 git clone <repo-url>
-cd toggl-mcp
+cd worklog-tracker
 npm install
 npm run build        # genera dist/cli.js
 ```

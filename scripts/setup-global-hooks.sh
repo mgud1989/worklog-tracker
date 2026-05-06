@@ -1,8 +1,11 @@
 #!/bin/bash
 # ── Setup Global Claude Code Hooks ────────────────────────────────────────────
-# Installs session-logger hooks into ~/.claude/settings.json
-# so they run on EVERY project. Session logs are the foundation for tempo push.
-# Toggl timer management is handled by Claude via SKILL.md instructions.
+# Installs worklog-tracker hooks into ~/.claude/settings.json so they run on
+# EVERY project. Hooks installed:
+#   - SessionStart → log + fire-and-forget Toggl timer start ([folder] branch)
+#   - Stop         → log ACTIVITY on each agent response
+#   - SessionEnd   → log + fire-and-forget Toggl timer stop
+#   - UserPromptSubmit → run nudge-check, inject reminders into agent context
 #
 # Usage:
 #   ./scripts/setup-global-hooks.sh          # install
@@ -104,6 +107,6 @@ echo "  session-logger:    $SESSION_LOGGER"
 echo "  nudge-check:       $NUDGE_CLI"
 echo ""
 echo "Session logs run on ALL Claude Code sessions."
-echo "Toggl timer is managed by Claude via worklog-tracker skill."
+echo "Toggl timer auto-starts/stops via session hooks (fire-and-forget CLI calls)."
 echo "Nudges run on every user prompt (with cross-process cooldown)."
 echo "To remove: $0 --remove"
