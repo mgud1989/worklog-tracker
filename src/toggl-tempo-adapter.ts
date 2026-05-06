@@ -60,7 +60,7 @@ export class TogglTempoAdapter {
       method: "POST",
       body: {
         wid: this.workspaceIdAsNumber(),
-        created_with: "toggl-mcp-server",
+        created_with: "worklog-tracker",
         description: input.description,
         start: input.timeRange.start,
         stop: input.timeRange.end,
@@ -86,7 +86,7 @@ export class TogglTempoAdapter {
         method: "POST",
         body: {
           wid: this.workspaceIdAsNumber(),
-          created_with: "toggl-mcp-server",
+          created_with: "worklog-tracker",
           description: input.description,
           start: input.time ?? new Date().toISOString(),
           duration: -1,

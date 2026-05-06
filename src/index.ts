@@ -123,7 +123,7 @@ async function bootstrap() {
 
   const server = new Server(
     {
-      name: "toggl-mcp-server",
+      name: "worklog-tracker",
       version: "0.1.0"
     },
     {
@@ -775,6 +775,6 @@ async function bootstrap() {
 
 bootstrap().catch((error) => {
   const message = error instanceof Error ? error.message : String(error);
-  process.stderr.write(`Failed to start toggl-mcp-server: ${message}\n`);
+  process.stderr.write(`Failed to start worklog-tracker: ${message}\n`);
   process.exit(1);
 });

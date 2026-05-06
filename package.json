@@ -1,9 +1,9 @@
 {
-  "name": "toggl-mcp-server",
+  "name": "worklog-tracker",
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "MCP server for Toggl/Tempo workflows",
+  "description": "Worklog tracker for Claude Code: session-logger hooks, Toggl timer, and session-based Tempo push via MCP",
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "dev": "tsx src/index.ts",

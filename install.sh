@@ -1,5 +1,5 @@
 #!/bin/bash
-# ── Toggl MCP — Team Install Script ─────────────────────────────────────────
+# ── Worklog Tracker — Team Install Script ──────────────────────────────────
 # Idempotent setup: safe to run multiple times.
 # Usage: ./install.sh
 
@@ -27,7 +27,7 @@ cd "$SCRIPT_DIR"
 
 echo ""
 echo -e "${BOLD}══════════════════════════════════════════${NC}"
-echo -e "${BOLD}  Toggl MCP — Full Install & Configuration${NC}"
+echo -e "${BOLD}  Worklog Tracker — Full Install & Configuration${NC}"
 echo -e "${BOLD}══════════════════════════════════════════${NC}"
 
 # ── Step 1: Check prerequisites ───────────────────────────────────────────
@@ -171,12 +171,14 @@ step 9 "Registering MCP server in Claude Code"
 if ! command -v claude &>/dev/null; then
   warn "claude CLI not found -- skipping MCP registration"
   warn "Register manually later with:"
-  warn "  claude mcp add toggl -s user -e MCP_CONFIG_PATH=\"${SCRIPT_DIR}/mcp.config.json\" -- node \"${SCRIPT_DIR}/dist/index.js\""
+  warn "  claude mcp add worklog-tracker -s user -e MCP_CONFIG_PATH=\"${SCRIPT_DIR}/mcp.config.json\" -- node \"${SCRIPT_DIR}/dist/index.js\""
 else
   # Remove existing registration (if any) to ensure clean state
+  claude mcp remove worklog-tracker -s user 2>/dev/null || true
+  # Also clean up any pre-rename registration
   claude mcp remove toggl -s user 2>/dev/null || true
 
-  if claude mcp add toggl \
+  if claude mcp add worklog-tracker \
     -s user \
     -e MCP_CONFIG_PATH="${SCRIPT_DIR}/mcp.config.json" \
     -- node "${SCRIPT_DIR}/dist/index.js"; then
