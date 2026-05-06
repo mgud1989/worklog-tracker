@@ -1,8 +1,8 @@
 #!/bin/bash
 
-# ── Session Logger ────────────────────────────────────────────────────────────
+# ── session-logger.sh ─────────────────────────────────────────────────────────
 # Registra inicio, fin e inactividad de sesiones de Claude Code.
-# Todo va a un único archivo de log.
+# Responsabilidad única: escritura de log. Sin lógica de Toggl.
 #
 # Uso:
 #   echo '{"session_id":"abc"}' | ./session-logger.sh start
@@ -20,47 +20,11 @@ fi
 
 # ── Paths ─────────────────────────────────────────────────────────────────────
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-LOG_DIR="${SCRIPT_DIR}/.session-logs"
+source "$SCRIPT_DIR/_common.sh"
+
+LOG_DIR="$SCRIPT_DIR/../.logs"
 mkdir -p "$LOG_DIR"
 LOG_FILE="${LOG_DIR}/session-$(date +%Y-%m).log"
-
-# ── Helpers ───────────────────────────────────────────────────────────────────
-timestamp() { date +"%d-%m-%Y %H:%M:%S"; }
-
-branch() { git branch --show-current 2>/dev/null || echo "no-branch"; }
-
-# Folder = basename of the repo root. Falls back to basename of cwd when not
-# inside a git repo. This is the caller's cwd (the dev's project), not the
-# worklog-tracker directory, because Claude Code invokes hooks from the session cwd.
-folder() {
-  local root
-  root="$(git rev-parse --show-toplevel 2>/dev/null)"
-  if [[ -n "$root" ]]; then
-    basename "$root"
-  else
-    basename "$(pwd)"
-  fi
-}
-
-log_entry() {
-  local label="$1"
-  local session="$2"
-  echo "$(timestamp) - [${label}] - Folder: $(folder) - Branch: $(branch) - session: ${session}" >>"$LOG_FILE"
-}
-
-CLI="$SCRIPT_DIR/../dist/cli.js"
-
-# Fire-and-forget timer command. Logs stdout+stderr to toggl-errors.log.
-TOGGL_LOG="${LOG_DIR}/toggl-errors.log"
-
-toggl_timer() {
-  local action="$1"
-  shift
-  (
-    printf "[%s] [%s] " "$(timestamp)" "$action"
-    node "$CLI" timer "$action" "$@" 2>&1
-  ) >>"$TOGGL_LOG" 2>&1 &
-}
 
 # ── start / stop / activity ───────────────────────────────────────────────────
 if [[ "$ACTION" == "start" || "$ACTION" == "stop" || "$ACTION" == "activity" ]]; then
@@ -71,14 +35,7 @@ if [[ "$ACTION" == "start" || "$ACTION" == "stop" || "$ACTION" == "activity" ]];
   stop) LABEL="STOP" ;;
   activity) LABEL="ACTIVITY" ;;
   esac
-  log_entry "$LABEL" "$SESSION_ID"
-
-  # Toggl timer integration (fire-and-forget, non-blocking)
-  case "$ACTION" in
-  start) toggl_timer start --description "[$(folder)] $(branch)" ;;
-  stop) toggl_timer stop ;;
-  esac
-
+  log_entry "$LABEL" "$SESSION_ID" "$LOG_FILE"
   exit 0
 fi
 
@@ -126,5 +83,5 @@ if $RECENT_COMMIT || $RECENT_CHANGES; then
 fi
 
 # Inactivo — loggear y salir con 1
-log_entry "INACTIVITY" "n/a (git-watchdog)"
+log_entry "INACTIVITY" "n/a (git-watchdog)" "$LOG_FILE"
 exit 1

@@ -214,7 +214,7 @@ function resolveProjectRoot(): string {
 
 function resolveLogDir(): string {
   const projectRoot = resolveProjectRoot();
-  return join(projectRoot, "session-logger", ".session-logs");
+  return join(projectRoot, ".logs");
 }
 
 function resolveDateRange(flags: TempoPushFlags): { from: string; to: string } {

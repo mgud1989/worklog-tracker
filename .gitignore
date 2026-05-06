@@ -3,6 +3,7 @@ dist/
 .env
 mcp.config.json
 .DS_Store
-.session-logs/
+.logs/*
+!.logs/.gitkeep
 toggl-mcp-project-spec.md
 .claude/

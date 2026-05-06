@@ -4,7 +4,7 @@
 
 Worklog Tracker is a hybrid system that combines:
 
-- **Bash hooks** in Claude Code (session-logger + nudge-check) that observe coding sessions
+- **Bash hooks** in Claude Code (hooks/session-logger + hooks/toggl-timer-hook + nudge-check) that observe coding sessions
 - **An MCP server** (`toggl`) that exposes time-tracking and worklog tools to AI agents
 - **A CLI** (`dist/cli.js`) for headless timer / push operations and for the hook integration
 
@@ -41,6 +41,7 @@ It is intended for engineering teams where worklog integrity affects billing and
 - `src/cli.ts`
   - Subcommands: `timer start|stop|status`, `tempo push`, `nudge-check`
   - Used by hooks (timer, nudge-check) and by the dev directly (tempo push)
+  - Resolves log dir from project root: `<root>/.logs/`
 
 - `src/config.ts`
   - Loads `.env` (project-root-aware: works regardless of cwd)
@@ -65,7 +66,7 @@ It is intended for engineering teams where worklog integrity affects billing and
 ### Session-log pipeline
 
 - `src/session-log-parser.ts`
-  - Reads `session-logger/.session-logs/session-YYYY-MM.log`
+  - Reads `.logs/session-YYYY-MM.log`
   - Filters by date range, parses `START / ACTIVITY / STOP / INACTIVITY` lines into typed entries
 
 - `src/session-consolidator.ts`
@@ -76,7 +77,7 @@ It is intended for engineering teams where worklog integrity affects billing and
   - `filterAlreadyPushed()` matches against existing Tempo descriptions by `[session:id]` markers
 
 - `src/state-manager.ts`
-  - Persists `session-logger/.session-logs/.state.json` with pushed sessionIds + last nudge timestamp
+  - Persists `.logs/.state.json` with pushed sessionIds + last nudge timestamp
   - Cross-process — used by both the MCP server and the `nudge-check` hook (which is a fresh process every prompt)
 
 ### Nudge
@@ -88,16 +89,32 @@ It is intended for engineering teams where worklog integrity affects billing and
 
 ### Hooks layer
 
-- `session-logger/session-logger.sh`
-  - SessionStart → log `START` + fire-and-forget `node dist/cli.js timer start --description "[folder] branch"`
-  - Stop → log `ACTIVITY`
-  - SessionEnd → log `STOP` + fire-and-forget `node dist/cli.js timer stop`
+All hook scripts live in `hooks/`. Each sources `hooks/_common.sh` for shared helpers (`timestamp()`, `folder()`, `branch()`, `log_entry()`).
+
+- `hooks/_common.sh`
+  - Shared helpers sourced by both hook scripts
+  - `folder()`: basename of git repo root (falls back to basename of cwd)
+  - `branch()`: current git branch
+  - `timestamp()`, `log_entry()`
+
+- `hooks/session-logger.sh`
+  - SessionStart → logs `START` entry to `.logs/session-YYYY-MM.log`
+  - Stop (activity hook) → logs `ACTIVITY` entry
+  - SessionEnd → logs `STOP` entry
   - Watchdog `check` mode evaluates git activity and emits `INACTIVITY` log entry when idle
-  - Toggl CLI stdout/stderr go to `session-logger/.session-logs/toggl-errors.log`
+  - Zero Toggl logic — single responsibility: session log writes
+
+- `hooks/toggl-timer-hook.sh`
+  - SessionStart → fire-and-forget `node dist/cli.js timer start --description "[folder] branch"`
+  - SessionEnd → fire-and-forget `node dist/cli.js timer stop`
+  - Output (success + errors) logged to `.logs/toggl.log` as audit trail
+  - Zero session-log writes — single responsibility: Toggl timer control
+
+SessionStart and SessionEnd each fire BOTH `session-logger.sh` AND `toggl-timer-hook.sh` as separate hook entries in `~/.claude/settings.json`.
 
 - `scripts/setup-global-hooks.sh`
-  - Installs / removes the four hooks in `~/.claude/settings.json` via `jq`
-  - Removal is selective: only deletes commands referencing `session-logger.sh` or `dist/cli.js nudge-check`, preserves other hooks
+  - Installs / removes hooks in `~/.claude/settings.json` via `jq`
+  - Removal is selective: only deletes commands referencing `hooks/session-logger.sh`, `hooks/toggl-timer-hook.sh`, or `dist/cli.js nudge-check`, preserves other hooks
 
 ## Tool Inventory
 
@@ -156,12 +173,12 @@ The catalog exposed to MCP clients depends on `mode` (in `mcp.config.json`) and 
 
 ### 1) Auto Toggl timer per session
 
-1. Dev launches Claude Code → `SessionStart` hook fires
-2. `session-logger.sh start` logs the START line
-3. Fire-and-forget `node dist/cli.js timer start --description "[folder] branch"`
+1. Dev launches Claude Code → `SessionStart` hook fires (two entries run sequentially)
+2. `hooks/session-logger.sh start` logs the `START` line to `.logs/session-YYYY-MM.log`
+3. `hooks/toggl-timer-hook.sh start` fires and-forget `node dist/cli.js timer start --description "[folder] branch"`
 4. CLI checks for an already-running timer with the same description → idempotent skip if match
 5. Otherwise calls Toggl `start` via the adapter
-6. SessionEnd → mirror flow with `timer stop`
+6. SessionEnd → same dual-hook pattern: `session-logger.sh stop` logs `STOP`, `toggl-timer-hook.sh stop` fires `timer stop`
 
 ### 2) Push session logs to Tempo
 
@@ -249,7 +266,8 @@ The catalog exposed to MCP clients depends on `mode` (in `mcp.config.json`) and 
 3. Edit `mcp.config.json` (`workspaceId`, `mode`, etc.)
 4. Restart Claude Code
 5. Smoke checks:
-   - Open a session → verify Toggl timer appears with `[folder] branch`
+   - Open a session → verify `.logs/session-YYYY-MM.log` has a `START` line AND Toggl timer appears with `[folder] branch` description
+   - The dual-hook pattern means BOTH `hooks/session-logger.sh start` AND `hooks/toggl-timer-hook.sh start` fire on SessionStart
    - `read_tracking_data` for today
    - `tempo_read_worklogs` for today
    - `preview_tempo_push --date today` (CLI: `node dist/cli.js tempo push --dry-run`)

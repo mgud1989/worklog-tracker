@@ -128,7 +128,7 @@ export function getLogFilesForRange(logDir: string, from: Date, to: Date): strin
  * Parse all log files for a date range and return filtered, deduplicated entries.
  * Filters out test/empty session IDs and entries outside the date range.
  *
- * @param logDir - Path to the .session-logs directory
+ * @param logDir - Path to the .logs directory
  * @param from - Start date (inclusive, YYYY-MM-DD string)
  * @param to - End date (inclusive, YYYY-MM-DD string)
  */

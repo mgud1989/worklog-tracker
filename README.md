@@ -4,7 +4,7 @@ Tracker de horas para sesiones de Claude Code. Combina hooks bash, un MCP server
 
 ## Que hace
 
-- **Session logger** — hooks de Claude Code registran START / ACTIVITY / STOP de cada sesión por branch + folder en `session-logger/.session-logs/session-YYYY-MM.log`
+- **Session logger** — hooks de Claude Code registran START / ACTIVITY / STOP de cada sesión por branch + folder en `.logs/session-YYYY-MM.log`
 - **Toggl timer automático** — el hook `SessionStart` arranca el timer con descripción `[folder] branch` (idempotente: no duplica si ya hay uno corriendo); `SessionEnd` lo para
 - **Tempo push session-based** — la CLI y el MCP consolidan los logs de sesión en worklogs por branch/día, deduplican contra Tempo via marker `[session:id]` y permiten preview antes de pushear
 - **Sync Toggl → Tempo** — exporta entradas Toggl de un rango a Tempo usando issue keys de la descripción; deduplica con marker `[toggl:<entryId>]`
@@ -82,14 +82,16 @@ Se instalan en `~/.claude/settings.json` y corren globalmente:
 
 | Evento | Comando | Acción |
 |--------|---------|--------|
-| `SessionStart` | `session-logger.sh start` | Loggea `START` + arranca Toggl timer (`[folder] branch`) fire-and-forget |
-| `Stop` | `session-logger.sh activity` | Loggea `ACTIVITY` después de cada respuesta del agente |
-| `SessionEnd` | `session-logger.sh stop` | Loggea `STOP` + para el Toggl timer fire-and-forget |
+| `SessionStart` | `hooks/session-logger.sh start` | Loggea `START` en `.logs/session-YYYY-MM.log` |
+| `SessionStart` | `hooks/toggl-timer-hook.sh start` | Arranca Toggl timer (`[folder] branch`) fire-and-forget |
+| `Stop` | `hooks/session-logger.sh activity` | Loggea `ACTIVITY` después de cada respuesta del agente |
+| `SessionEnd` | `hooks/session-logger.sh stop` | Loggea `STOP` en `.logs/session-YYYY-MM.log` |
+| `SessionEnd` | `hooks/toggl-timer-hook.sh stop` | Para el Toggl timer fire-and-forget |
 | `UserPromptSubmit` | `node dist/cli.js nudge-check` | Inyecta reminders al agente si hay sesiones sin pushear |
 
-El `folder` es el basename del repo (`git rev-parse --show-toplevel`) o del cwd si no es git. El `branch` es `git branch --show-current`. Todo log queda en `session-logger/.session-logs/session-YYYY-MM.log`.
+El `folder` es el basename del repo (`git rev-parse --show-toplevel`) o del cwd si no es git. El `branch` es `git branch --show-current`. Todo log queda en `.logs/session-YYYY-MM.log`.
 
-Los errores del timer Toggl se loggean (no se silencian) en `session-logger/.session-logs/toggl-errors.log`.
+El output del timer Toggl (success + errors) se loggea en `.logs/toggl.log` como audit trail.
 
 Para remover hooks: `scripts/setup-global-hooks.sh --remove` (preserva otros hooks que tengas instalados).
 

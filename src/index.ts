@@ -35,11 +35,11 @@ function resolveSessionLogDir(): string {
   const mcpConfigPath = process.env.MCP_CONFIG_PATH;
   if (mcpConfigPath) {
     const configDir = dirname(resolve(process.cwd(), mcpConfigPath));
-    return resolve(configDir, "session-logger", ".session-logs");
+    return resolve(configDir, ".logs");
   }
   // Fallback: compiled JS lives in dist/, project root is one level up
   const scriptDir = dirname(new URL(import.meta.url).pathname);
-  return resolve(scriptDir, "..", "session-logger", ".session-logs");
+  return resolve(scriptDir, "..", ".logs");
 }
 
 /**

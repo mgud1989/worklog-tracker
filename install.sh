@@ -134,10 +134,14 @@ fi
 # ── Step 7: Initialize state file directory ───────────────────────────────
 step 7 "Initializing state and log directories"
 
-mkdir -p session-logger/.session-logs
-ok "session-logger/.session-logs/ ready"
+if [[ -f .logs/.gitkeep ]]; then
+  ok ".logs/ already exists -- skipping mkdir"
+else
+  mkdir -p .logs
+  ok ".logs/ ready"
+fi
 
-if [[ -f session-logger/.session-logs/.state.json ]]; then
+if [[ -f .logs/.state.json ]]; then
   warn ".state.json already exists -- preserving push history"
 else
   ok ".state.json will be created on first tempo push"
@@ -206,7 +210,7 @@ echo ""
 echo -e "${BOLD}What was configured:${NC}"
 echo -e "  ${GREEN}*${NC} npm dependencies installed and project built"
 echo -e "  ${GREEN}*${NC} Claude Code hooks: auto-start/stop Toggl timer on session start/end"
-echo -e "  ${GREEN}*${NC} Session logger: tracks activity in session-logger/.session-logs/"
+echo -e "  ${GREEN}*${NC} Session logger: tracks activity in .logs/"
 echo -e "  ${GREEN}*${NC} State file: push history persisted across sessions"
 echo -e "  ${GREEN}*${NC} Nudge system: MCP tools remind about unpushed sessions"
 
