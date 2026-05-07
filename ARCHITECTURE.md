@@ -4,15 +4,13 @@
 
 Worklog Tracker is a hybrid system that combines:
 
-- **Bash hooks** in Claude Code (hooks/session-logger + hooks/toggl-timer-hook + nudge-check) that observe coding sessions
-- **An MCP server** (`toggl`) that exposes time-tracking and worklog tools to AI agents
-- **A CLI** (`dist/cli.js`) for headless timer / push operations and for the hook integration
+- **Bash hooks** in Claude Code (hooks/session-logger + nudge-check) that observe coding sessions
+- **An MCP server** (`worklog-tracker`) that exposes worklog tools to AI agents
+- **A CLI** (`dist/cli.js`) for headless push operations and for the hook integration
 
 It centralizes:
-- Time tracking operations in Toggl
 - Worklog operations in Tempo/Jira
-- Session-log → Tempo consolidation (the system's own native flow)
-- Toggl → Tempo synchronization (legacy/external Toggl entries)
+- Session-log → Tempo consolidation (the system's native push flow)
 
 It is intended for engineering teams where worklog integrity affects billing and reporting.
 
@@ -25,7 +23,6 @@ It is intended for engineering teams where worklog integrity affects billing and
 - Env loading: `dotenv`
 - Hooks: bash + `jq` (Claude Code SessionStart / Stop / SessionEnd / UserPromptSubmit)
 - External APIs:
-  - Toggl Track API v9 (`https://api.track.toggl.com/api/v9`)
   - Tempo API v4 (`https://api.tempo.io/4`)
   - Jira REST API v3 (`/rest/api/3/...`)
 
@@ -35,17 +32,17 @@ It is intended for engineering teams where worklog integrity affects billing and
 
 - `src/index.ts`
   - MCP bootstrap (stdio transport)
-  - Tool catalog definition gated by `mode` and available adapters
+  - Tool catalog definition gated by available adapters
   - Tool routing, error mapping (Zod → `McpError`)
 
 - `src/cli.ts`
-  - Subcommands: `timer start|stop|status`, `tempo push`, `nudge-check`
-  - Used by hooks (timer, nudge-check) and by the dev directly (tempo push)
+  - Subcommands: `tempo push`, `nudge-check`
+  - Used by the nudge-check hook and by the dev directly (tempo push)
   - Resolves log dir from project root: `<root>/.logs/`
 
 - `src/config.ts`
   - Loads `.env` (project-root-aware: works regardless of cwd)
-  - Loads + validates `mcp.config.json` with Zod
+  - Loads + validates `mcp.config.json` with Zod (strict schema — unknown keys fail)
   - Normalizes `defaultWorkAttributes` (string → `[{key,value}]`)
   - Resolves project root from compiled module location → CLI works from any cwd
 
@@ -54,14 +51,9 @@ It is intended for engineering teams where worklog integrity affects billing and
 
 ### Adapters
 
-- `src/toggl-tempo-adapter.ts`
-  - Toggl: create entry, start/stop/get-current timer, read entries, update entry
-  - Resolves project name by id (used in CLI status output)
-
 - `src/tempo-jira-adapter.ts`
   - Tempo: create / read / delete worklog
   - Jira: resolve current user accountId, resolve issue key/id, optional Tempo Account custom field
-  - Sync logic Toggl → Tempo with `[toggl:<entryId>]` duplicate marker
 
 ### Session-log pipeline
 
@@ -92,7 +84,7 @@ It is intended for engineering teams where worklog integrity affects billing and
 All hook scripts live in `hooks/`. Each sources `hooks/_common.sh` for shared helpers (`timestamp()`, `folder()`, `branch()`, `log_entry()`).
 
 - `hooks/_common.sh`
-  - Shared helpers sourced by both hook scripts
+  - Shared helpers sourced by hook scripts
   - `folder()`: basename of git repo root (falls back to basename of cwd)
   - `branch()`: current git branch
   - `timestamp()`, `log_entry()`
@@ -102,45 +94,26 @@ All hook scripts live in `hooks/`. Each sources `hooks/_common.sh` for shared he
   - Stop (activity hook) → logs `ACTIVITY` entry
   - SessionEnd → logs `STOP` entry
   - Watchdog `check` mode evaluates git activity and emits `INACTIVITY` log entry when idle
-  - Zero Toggl logic — single responsibility: session log writes
-
-- `hooks/toggl-timer-hook.sh`
-  - SessionStart → fire-and-forget `node dist/cli.js timer start --description "[folder] branch"`
-  - SessionEnd → fire-and-forget `node dist/cli.js timer stop`
-  - Output (success + errors) logged to `.logs/toggl.log` as audit trail
-  - Zero session-log writes — single responsibility: Toggl timer control
-
-SessionStart and SessionEnd each fire BOTH `session-logger.sh` AND `toggl-timer-hook.sh` as separate hook entries in `~/.claude/settings.json`.
+  - Single responsibility: session log writes
 
 - `scripts/setup-global-hooks.sh`
   - Installs / removes hooks in `~/.claude/settings.json` via `jq`
-  - Removal is selective: only deletes commands referencing `hooks/session-logger.sh`, `hooks/toggl-timer-hook.sh`, or `dist/cli.js nudge-check`, preserves other hooks
+  - Removal is selective: only deletes commands referencing `hooks/session-logger.sh` or `dist/cli.js nudge-check`, preserves other hooks
 
 ## Tool Inventory
 
-The catalog exposed to MCP clients depends on `mode` (in `mcp.config.json`) and the credentials available in `.env`.
+The catalog exposed to MCP clients depends on the credentials available in `.env`.
 
 ### Always available (session-log based, no API token)
 
 - `preview_tempo_push`
 
-### Toggl (when `mode ∈ {toggl, both}` and `TOGGL_API_TOKEN` is set)
-
-- `log_work_entry`
-- `smart_timer_control`
-- `read_tracking_data`
-- `update_work_entry`
-
-### Tempo (when `mode ∈ {tempo, both}` and Tempo+Jira credentials are set)
+### Tempo (when Tempo+Jira credentials are set)
 
 - `tempo_create_worklog`
 - `tempo_read_worklogs`
 - `tempo_delete_worklog`
 - `push_tempo_worklogs`
-
-### Sync (requires both adapters)
-
-- `sync_toggl_range_to_tempo`
 
 ## Core Data Concepts
 
@@ -155,15 +128,11 @@ The catalog exposed to MCP clients depends on `mode` (in `mcp.config.json`) and 
   - One per (branch, date) — aggregates all windows for that pair into a single Tempo worklog
   - Fields: `issueKey`, `branch`, `folder`, `date`, `startTime`, `durationHours`, `sessionIds[]`, `windowCount`, `description`
 
-- **Toggl entry**
-  - `id`, `description`, `start`, `stop`, `duration`, `tags`, `project_id`
-
 - **Tempo worklog**
   - `tempoWorklogId`, `issueId`, `startDate`, `startTime`, `timeSpentSeconds`, `description`, `attributes`
 
-- **Duplicate markers**
+- **Duplicate marker**
   - `[session:<sessionId>]` — appended to Tempo description by `push_tempo_worklogs`. Used by `filterAlreadyPushed` to skip already-pushed sessions
-  - `[toggl:<entryId>]` — appended by `sync_toggl_range_to_tempo`. Used to skip already-synced Toggl entries
 
 - **Default routing values**
   - `defaultIssueKey` — fallback when no key extracted from branch / description
@@ -171,16 +140,7 @@ The catalog exposed to MCP clients depends on `mode` (in `mcp.config.json`) and 
 
 ## Main Flows
 
-### 1) Auto Toggl timer per session
-
-1. Dev launches Claude Code → `SessionStart` hook fires (two entries run sequentially)
-2. `hooks/session-logger.sh start` logs the `START` line to `.logs/session-YYYY-MM.log`
-3. `hooks/toggl-timer-hook.sh start` fires and-forget `node dist/cli.js timer start --description "[folder] branch"`
-4. CLI checks for an already-running timer with the same description → idempotent skip if match
-5. Otherwise calls Toggl `start` via the adapter
-6. SessionEnd → same dual-hook pattern: `session-logger.sh stop` logs `STOP`, `toggl-timer-hook.sh stop` fires `timer stop`
-
-### 2) Push session logs to Tempo
+### 1) Push session logs to Tempo
 
 1. Dev: "subir worklogs de hoy" → agent calls `preview_tempo_push`
 2. Server parses session logs for the date range (`session-log-parser`)
@@ -190,17 +150,7 @@ The catalog exposed to MCP clients depends on `mode` (in `mcp.config.json`) and 
 6. Dev confirms → agent calls `push_tempo_worklogs` with the worklog list
 7. Server creates each worklog via Tempo, records sessionIds in `state-manager`, returns success/fail summary
 
-### 3) Sync Toggl range → Tempo (legacy / external entries)
-
-1. Read Toggl entries in range
-2. Keep closed entries (`stop` present, positive duration)
-3. Read existing Tempo worklogs in the date window
-4. Build set of existing `[toggl:<id>]` markers
-5. For each eligible entry: extract issue key from description or fallback to `defaultIssueKey`
-6. Create Tempo worklog with description + sync marker + default attributes
-7. Return per-entry result (`synced`, `skipped`, `failed`)
-
-### 4) Nudge delivery
+### 2) Nudge delivery
 
 - **UserPromptSubmit hook**: every user prompt triggers `node dist/cli.js nudge-check`. Its stdout is injected into the agent's context for that turn. Cross-process cooldown via `state-manager` (persisted in `.state.json`) prevents double-nudging.
 - This is the only delivery path: the hook guarantees delivery even when the agent never calls a worklog-tracker MCP tool that turn, so MCP tool responses are not wrapped.
@@ -210,7 +160,6 @@ The catalog exposed to MCP clients depends on `mode` (in `mcp.config.json`) and 
 ### `.env`
 
 - Optional (gates which tools are exposed):
-  - `TOGGL_API_TOKEN` — required for Toggl tools
   - `TEMPO_API_TOKEN`, `JIRA_BASE_URL`, `JIRA_API_TOKEN` — all three required together for Tempo tools
   - `JIRA_EMAIL` — required when `JIRA_AUTH_TYPE=basic`
 - Other:
@@ -221,33 +170,33 @@ The catalog exposed to MCP clients depends on `mode` (in `mcp.config.json`) and 
 ### `mcp.config.json`
 
 - Required:
-  - `workspaceId`
   - `timezone`
 - Optional:
-  - `mode` (`toggl` | `tempo` | `both`, default `toggl`)
   - `defaultIssueKey`
   - `defaultWorkAttributes` (string or array)
   - `inactivityThresholdMinutes` (default 10)
   - `nudge.enabled` (default true)
   - `nudge.cooldownMinutes` (default 30)
   - `nudge.pushReminderAfterHours` (default 4)
-  - `nudge.endOfDayHour` (default 17)
+  - `nudge.endOfDayHour` (default 19)
+
+Note: the schema is **strict** — any unknown field (e.g. a stale `mode` or `workspaceId`) causes startup to fail with a Zod validation error. This is intentional.
 
 ## Reliability and Billing Integrity Considerations
 
 - Strong input validation with Zod for every tool
 - Explicit timezone handling to reduce date drift
-- Duplicate prevention via session/sync markers
+- Duplicate prevention via session markers
 - Cross-process state file (`.state.json`) for nudge cooldown across hook invocations
 - Structured responses for auditable agent output
 - Fail-fast startup for invalid config; missing credentials degrade tool catalog instead of crashing
-- Hooks are non-blocking: timer + nudge-check are fire-and-forget / silent-on-failure to never block the dev's workflow
+- Hooks are non-blocking: nudge-check is fire-and-forget / silent-on-failure to never block the dev's workflow
 
 ## Known Limitations
 
-- Sync duplicate protection is marker-based; external/manual edits to descriptions can weaken detection
+- Duplicate protection is marker-based; external/manual edits to descriptions can weaken detection
 - `tempo_read_worklogs` resolves issue keys by calling the Jira issue endpoint per unique issue id
-- No persistent local sync ledger yet (`togglEntryId → tempoWorklogId`) — idempotency is not fully durable
+- No persistent local sync ledger yet — idempotency is not fully durable
 - No retry/backoff policy for transient API failures
 - No automated tests — adapters and parsers are validated by manual smoke checks
 
@@ -263,12 +212,10 @@ The catalog exposed to MCP clients depends on `mode` (in `mcp.config.json`) and 
 
 1. `./install.sh`
 2. Edit `.env` with API tokens
-3. Edit `mcp.config.json` (`workspaceId`, `mode`, etc.)
+3. Edit `mcp.config.json` (`timezone`, etc.)
 4. Restart Claude Code
 5. Smoke checks:
-   - Open a session → verify `.logs/session-YYYY-MM.log` has a `START` line AND Toggl timer appears with `[folder] branch` description
-   - The dual-hook pattern means BOTH `hooks/session-logger.sh start` AND `hooks/toggl-timer-hook.sh start` fire on SessionStart
-   - `read_tracking_data` for today
+   - Open a session → verify `.logs/session-YYYY-MM.log` has a `START` line
    - `tempo_read_worklogs` for today
    - `preview_tempo_push --date today` (CLI: `node dist/cli.js tempo push --dry-run`)
    - `tempo_create_worklog` on a safe issue, then `tempo_delete_worklog` to clean up

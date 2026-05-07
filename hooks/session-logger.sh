@@ -2,7 +2,6 @@
 
 # ── session-logger.sh ─────────────────────────────────────────────────────────
 # Registra inicio, fin e inactividad de sesiones de Claude Code.
-# Responsabilidad única: escritura de log. Sin lógica de Toggl.
 #
 # Uso:
 #   echo '{"session_id":"abc"}' | ./session-logger.sh start

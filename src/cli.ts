@@ -10,146 +10,11 @@ import {
 } from "./session-consolidator.js";
 import { StateManager } from "./state-manager.js";
 import { TempoJiraAdapter } from "./tempo-jira-adapter.js";
-import { TogglTempoAdapter } from "./toggl-tempo-adapter.js";
-import type { SmartTimerControlInput, TempoPushResult } from "./types.js";
+import type { TempoPushResult } from "./types.js";
 
 const USAGE = `Usage:
-  node dist/cli.js timer start --description "PROJ-123 working" [--project NAME] [--tags tag1,tag2]
-  node dist/cli.js timer stop
-  node dist/cli.js timer status
   node dist/cli.js tempo push [--date today|YYYY-MM-DD] [--from YYYY-MM-DD --to YYYY-MM-DD] [--dry-run]
   node dist/cli.js nudge-check`;
-
-// ─── Timer Command ──────────────────────────────────────────────────────
-
-function parseTimerArgs(flags: string[]): SmartTimerControlInput {
-  const action = flags[0];
-  if (action !== "start" && action !== "stop") {
-    process.stderr.write(`Unknown action: ${action ?? "(none)"}\n\n${USAGE}\n`);
-    process.exit(1);
-  }
-
-  const input: SmartTimerControlInput = { action };
-  const rest = flags.slice(1);
-
-  for (let i = 0; i < rest.length; i++) {
-    const flag = rest[i];
-    const value = rest[i + 1];
-
-    if (flag === "--description" && value) {
-      input.description = value;
-      i++;
-    } else if (flag === "--project" && value) {
-      input.project = value;
-      i++;
-    } else if (flag === "--tags" && value) {
-      input.tags = value.split(",").map((t) => t.trim());
-      i++;
-    } else {
-      process.stderr.write(`Unknown flag: ${flag}\n\n${USAGE}\n`);
-      process.exit(1);
-    }
-  }
-
-  if (action === "start" && !input.description) {
-    process.stderr.write(`--description is required for timer start\n\n${USAGE}\n`);
-    process.exit(1);
-  }
-
-  return input;
-}
-
-async function runTimerCommand(flags: string[]): Promise<void> {
-  const input = parseTimerArgs(flags);
-
-  const appConfig = loadMcpConfig(resolveConfigPath());
-  const env = loadAndValidateEnv();
-
-  if (!env.togglApiToken) {
-    process.stderr.write("Toggl not configured. Set TOGGL_API_TOKEN in .env\n");
-    process.exit(1);
-  }
-
-  const adapter = await TogglTempoAdapter.create(env.togglApiToken, appConfig);
-
-  // Skip starting if there's already a running timer with the same description
-  if (input.action === "start") {
-    const current = await adapter.getCurrentTimer();
-    if (current?.description === input.description) {
-      process.stdout.write(`Timer already running: ${input.description}\n`);
-      process.stdout.write(`${JSON.stringify(current)}\n`);
-      return;
-    }
-  }
-
-  const result = await adapter.smartTimerControl(input);
-
-  if (input.action === "start") {
-    process.stdout.write(`Timer started: ${input.description}\n`);
-  } else {
-    process.stdout.write("Timer stopped\n");
-  }
-
-  process.stdout.write(`${JSON.stringify(result)}\n`);
-}
-
-// ─── Timer Status Command ───────────────────────────────────────────────
-
-function formatElapsed(startIso: string): string {
-  const elapsed = Math.floor((Date.now() - new Date(startIso).getTime()) / 1000);
-  if (elapsed < 60) return `${elapsed}s`;
-  const minutes = Math.floor(elapsed / 60);
-  if (minutes < 60) return `${minutes}m`;
-  const hours = Math.floor(minutes / 60);
-  const remainingMinutes = minutes % 60;
-  return `${hours}h ${remainingMinutes}m`;
-}
-
-function formatTime(isoString: string): string {
-  const d = new Date(isoString);
-  return d.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
-}
-
-async function runTimerStatusCommand(): Promise<void> {
-  const appConfig = loadMcpConfig(resolveConfigPath());
-  const env = loadAndValidateEnv();
-
-  if (!env.togglApiToken) {
-    process.stderr.write("Toggl not configured. Set TOGGL_API_TOKEN in .env\n");
-    process.exit(1);
-  }
-
-  const adapter = await TogglTempoAdapter.create(env.togglApiToken, appConfig);
-
-  let current: Awaited<ReturnType<typeof adapter.getCurrentTimer>>;
-  try {
-    current = await adapter.getCurrentTimer();
-  } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error);
-    process.stderr.write(`\u2717 Failed to fetch timer status: ${reason}\n`);
-    process.exit(1);
-  }
-
-  if (!current) {
-    process.stdout.write("\u25CB No timer running\n");
-    return;
-  }
-
-  let projectName = "-";
-  if (current.project_id) {
-    projectName = (await adapter.getProjectNameById(current.project_id)) ?? "-";
-  }
-
-  const tags = current.tags.length > 0 ? current.tags.join(", ") : "-";
-  const elapsed = current.start ? formatElapsed(current.start) : "-";
-  const startTime = current.start ? formatTime(current.start) : "-";
-
-  process.stdout.write(`\u25B6 Running: ${current.description || "(no description)"}\n`);
-  process.stdout.write(`  Started:  ${startTime} (${elapsed} ago)\n`);
-  process.stdout.write(`  Project:  ${projectName}\n`);
-  process.stdout.write(`  Tags:     ${tags}\n`);
-  process.stdout.write(`  ID:       ${current.id}\n`);
-}
 
 // ─── Tempo Push Command ─────────────────────────────────────────────────
 
@@ -470,11 +335,7 @@ async function main() {
   const args = process.argv.slice(2);
   const command = args[0];
 
-  if (command === "timer" && args[1] === "status") {
-    await runTimerStatusCommand();
-  } else if (command === "timer") {
-    await runTimerCommand(args.slice(1));
-  } else if (command === "tempo" && args[1] === "push") {
+  if (command === "tempo" && args[1] === "push") {
     await runTempoPushCommand(args.slice(2));
   } else if (command === "nudge-check") {
     await runNudgeCheckCommand();

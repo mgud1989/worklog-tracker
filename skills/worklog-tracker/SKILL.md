@@ -1,6 +1,6 @@
 ---
 name: worklog-tracker
-description: Manage Toggl time tracking and Tempo worklog consolidation during coding sessions
+description: Manage session-based Tempo worklog consolidation during coding sessions
 triggers:
   - session start
   - session resume
@@ -8,7 +8,6 @@ triggers:
   - push
   - task completion
   - worklog
-  - toggl
   - tempo
   - time tracking
   - horas
@@ -16,26 +15,14 @@ triggers:
 
 # Worklog Tracker Skill
 
-You have access to the `worklog-tracker` MCP server for Toggl + Tempo workflows. Bash hooks log sessions and drive the Toggl timer; you handle review/push to Tempo with the dev.
+You have access to the `worklog-tracker` MCP server for Tempo worklog workflows. Bash hooks log sessions; you handle review/push to Tempo with the dev.
 
 ## How time tracking works
 
-- **SessionStart hook** (bash) logs `START` and fires `node dist/cli.js timer start --description "[folder] branch"` fire-and-forget. Idempotent: skips if a timer with the same description is already running.
-- **Stop hook** (bash) logs `ACTIVITY` on every Claude response. No timer action.
-- **SessionEnd hook** (bash) logs `STOP` and stops the Toggl timer fire-and-forget.
+- **SessionStart hook** (bash) logs `START` to `.logs/session-YYYY-MM.log`.
+- **Stop hook** (bash) logs `ACTIVITY` on every Claude response.
+- **SessionEnd hook** (bash) logs `STOP`.
 - **UserPromptSubmit hook** runs `nudge-check` on every user prompt — its stdout is injected into your context, so you may see push reminders even without calling any MCP tool.
-
-You do NOT start or stop the Toggl timer yourself. Hooks do it. If the dev asks about their timer, use `read_tracking_data` to inspect Toggl.
-
-## Modes (mcp.config.json)
-
-The `mode` field gates which MCP tools are exposed:
-
-- `toggl` — only Toggl tools available (no Tempo)
-- `tempo` — only Tempo tools available (no Toggl)
-- `both` — full toolset (default in install)
-
-Tools that require both adapters (`sync_toggl_range_to_tempo`) only appear when both are configured. The session-log tools (`preview_tempo_push`) work without any API token.
 
 ## Push Workflow (session-log → Tempo)
 
@@ -47,13 +34,11 @@ When the dev asks to push hours / consolidate / "subir worklogs":
 
 Use `tempo_delete_worklog` if a bad push needs reverting (find the ID via `tempo_read_worklogs`).
 
-For Toggl entries (not session-log based), use `sync_toggl_range_to_tempo` — it dedupes via `[toggl:<entryId>]` markers in Tempo descriptions.
-
 ## Nudge System
 
 `UserPromptSubmit` hook runs `nudge-check` and injects reminders into your context when:
 - There are unpushed sessions older than `pushReminderAfterHours` (default 4h)
-- It's past `endOfDayHour` (default 17/19)
+- It's past `endOfDayHour` (default 19)
 - Cooldown of `cooldownMinutes` (default 30) has elapsed since the last nudge
 
 When you see a nudge:
@@ -64,6 +49,5 @@ When you see a nudge:
 ## Rules
 
 - NEVER push to Tempo without the dev reviewing the preview and confirming
-- Session logs (ACTIVITY-based) measure time WITH Claude. Toggl measures total dev time. They are different sources
-- Timer is automatic via hooks — do not start/stop it manually unless the dev explicitly asks
+- Session logs (ACTIVITY-based) measure time WITH Claude
 - For Tempo push: dev validates and confirms before anything goes to Tempo

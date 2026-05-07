@@ -66,7 +66,6 @@ const nudgeConfigSchema = z.object({
 }).optional().default({});
 
 const configSchema = z.object({
-  workspaceId: z.string().min(1, "workspaceId is required"),
   timezone: z.string().min(1, "timezone is required"),
   defaultIssueKey: z.string().min(1).optional(),
   defaultWorkAttributes: z
@@ -80,15 +79,13 @@ const configSchema = z.object({
       )
     ])
     .optional(),
-  mode: z.enum(["toggl", "tempo", "both"]).optional().default("tempo"),
   inactivityThresholdMinutes: z.number().int().positive().optional().default(10),
   logRetentionMonths: z.number().int().min(1).optional().default(3),
   nudge: nudgeConfigSchema
-});
+}).strict();
 
 const envSchema = z
   .object({
-    TOGGL_API_TOKEN: z.string().optional(),
     TEMPO_API_TOKEN: z.string().optional(),
     JIRA_BASE_URL: z.string().optional(),
     JIRA_API_TOKEN: z.string().optional(),
@@ -172,11 +169,9 @@ export function loadMcpConfig(configPathFromEnv?: string): AppConfig {
       : rawConfig.logRetentionMonths;
 
   return {
-    workspaceId: rawConfig.workspaceId,
     timezone: rawConfig.timezone,
     defaultIssueKey: rawConfig.defaultIssueKey,
     defaultWorkAttributes,
-    mode: rawConfig.mode,
     inactivityThresholdMinutes: rawConfig.inactivityThresholdMinutes,
     logRetentionMonths,
     nudge: {
@@ -189,18 +184,13 @@ export function loadMcpConfig(configPathFromEnv?: string): AppConfig {
 }
 
 export function loadAndValidateEnv(): {
-  togglApiToken?: string;
   tempoJiraConfig?: TempoJiraConfig;
 } {
   const env = envSchema.parse(process.env);
 
   const hasTempoJira = [env.TEMPO_API_TOKEN, env.JIRA_BASE_URL, env.JIRA_API_TOKEN].every(Boolean);
 
-  const result: { togglApiToken?: string; tempoJiraConfig?: TempoJiraConfig } = {};
-
-  if (env.TOGGL_API_TOKEN) {
-    result.togglApiToken = env.TOGGL_API_TOKEN;
-  }
+  const result: { tempoJiraConfig?: TempoJiraConfig } = {};
 
   if (hasTempoJira) {
     result.tempoJiraConfig = {

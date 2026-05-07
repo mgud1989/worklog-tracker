@@ -2,7 +2,7 @@
 
 ## Problema
 
-Hoy el flujo Toggl → Tempo requiere que el dev use Toggl como timer. Queremos ofrecer una alternativa directa a Tempo sin depender de Toggl, usando los logs de sesion que ya se generan con los hooks de Claude Code.
+Queremos un flujo directo a Tempo que use los logs de sesion que ya se generan con los hooks de Claude Code.
 
 Los edge cases de auto-push en SessionEnd (crash, idle, terminal cerrada) hacen inviable un push automatico. La consolidacion manual al final del dia es mas robusta y confiable.
 
@@ -52,7 +52,6 @@ node dist/cli.js tempo push --date today
 En `mcp.config.json`:
 ```json
 {
-  "mode": "toggl" | "tempo" | "both",
   "inactivityThresholdMinutes": 10
 }
 ```

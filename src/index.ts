@@ -13,18 +13,12 @@ import { consolidateSessions, buildPushPreview, filterAlreadyPushed } from "./se
 import { parseSessionLogs } from "./session-log-parser.js";
 import { StateManager } from "./state-manager.js";
 import { TempoJiraAdapter } from "./tempo-jira-adapter.js";
-import { TogglTempoAdapter } from "./toggl-tempo-adapter.js";
 import {
   buildToolResponse,
-  parseLogWorkEntry,
   parsePreviewTempoPush,
   parsePushTempoWorklogs,
-  parseReadTrackingData,
-  parseSyncTogglRangeToTempo,
-  parseSmartTimerControl,
   parseTempoCreateWorklog,
-  parseTempoReadWorklogs,
-  parseUpdateWorkEntry
+  parseTempoReadWorklogs
 } from "./tools.js";
 
 /**
@@ -62,9 +56,6 @@ function resolveDateInput(input: { date?: string; from?: string; to?: string }):
 async function bootstrap() {
   const appConfig = loadMcpConfig(process.env.MCP_CONFIG_PATH);
   const env = loadAndValidateEnv();
-  const togglAdapter = env.togglApiToken
-    ? await TogglTempoAdapter.create(env.togglApiToken, appConfig)
-    : null;
   const tempoJiraAdapter = env.tempoJiraConfig
     ? new TempoJiraAdapter(env.tempoJiraConfig, appConfig.timezone)
     : null;
@@ -86,100 +77,6 @@ async function bootstrap() {
   );
 
   // ─── Tool definitions by category ─────────────────────────────────────
-  const togglTools = [
-    {
-      name: "log_work_entry",
-      description:
-        "Create a Toggl worklog entry. Inputs are description, timeRange, optional project and tags.",
-      inputSchema: {
-        type: "object" as const,
-        properties: {
-          description: { type: "string" },
-          timeRange: {
-            type: "object",
-            properties: {
-              start: { type: "string", format: "date-time" },
-              end: { type: "string", format: "date-time" }
-            },
-            required: ["start", "end"],
-            additionalProperties: false
-          },
-          project: { type: "string" },
-          tags: {
-            type: "array",
-            items: { type: "string" }
-          }
-        },
-        required: ["description", "timeRange"],
-        additionalProperties: false
-      }
-    },
-    {
-      name: "smart_timer_control",
-      description:
-        "Start or stop a Toggl timer. action=start requires description; action=stop can include optional time.",
-      inputSchema: {
-        type: "object" as const,
-        properties: {
-          action: {
-            type: "string",
-            enum: ["start", "stop"]
-          },
-          description: { type: "string" },
-          time: { type: "string", format: "date-time" },
-          project: { type: "string" },
-          tags: {
-            type: "array",
-            items: { type: "string" }
-          }
-        },
-        required: ["action"],
-        additionalProperties: false
-      }
-    },
-    {
-      name: "read_tracking_data",
-      description: "Read Toggl tracked entries in a given timeRange.",
-      inputSchema: {
-        type: "object" as const,
-        properties: {
-          timeRange: {
-            type: "object",
-            properties: {
-              start: { type: "string", format: "date-time" },
-              end: { type: "string", format: "date-time" }
-            },
-            required: ["start", "end"],
-            additionalProperties: false
-          }
-        },
-        required: ["timeRange"],
-        additionalProperties: false
-      }
-    },
-    {
-      name: "update_work_entry",
-      description:
-        "Editar un registro existente de Toggl por entryId. Permite editar description, start, stop, project y tags.",
-      inputSchema: {
-        type: "object" as const,
-        properties: {
-          entryId: { type: "number" },
-          description: { type: "string" },
-          start: { type: "string", format: "date-time" },
-          stop: { type: "string", format: "date-time" },
-          project: { type: "string" },
-          tags: {
-            type: "array",
-            items: { type: "string" }
-          }
-        },
-        required: ["entryId"],
-        additionalProperties: false
-      }
-    },
-  ];
-
   const tempoTools = [
     {
       name: "tempo_create_worklog",
@@ -287,44 +184,6 @@ async function bootstrap() {
     },
   ];
 
-  // Tools that require BOTH Toggl and Tempo adapters
-  const syncTools = [
-    {
-      name: "sync_toggl_range_to_tempo",
-      description:
-        "Sync closed Toggl entries in a time range to Tempo using issue keys from entry descriptions.",
-      inputSchema: {
-        type: "object" as const,
-        properties: {
-          timeRange: {
-            type: "object",
-            properties: {
-              start: { type: "string", format: "date-time" },
-              end: { type: "string", format: "date-time" }
-            },
-            required: ["start", "end"],
-            additionalProperties: false
-          },
-          defaultIssueKey: { type: "string" },
-          defaultWorkAttributes: {
-            type: "array",
-            items: {
-              type: "object",
-              properties: {
-                key: { type: "string" },
-                value: { type: "string" }
-              },
-              required: ["key", "value"],
-              additionalProperties: false
-            }
-          }
-        },
-        required: ["timeRange"],
-        additionalProperties: false
-      }
-    },
-  ];
-
   // Tools that work without any API tokens (session-log based)
   const sessionLogTools = [
     {
@@ -352,25 +211,13 @@ async function bootstrap() {
     },
   ];
 
-  // ─── Assemble tools based on mode and available adapters ──────────────
+  // ─── Assemble tools ────────────────────────────────────────────────────
   type ToolDef = { name: string; description: string; inputSchema: Record<string, unknown> };
   server.setRequestHandler(ListToolsRequestSchema, async () => {
     const tools: ToolDef[] = [...sessionLogTools]; // Always available
 
-    const includeToggl = appConfig.mode === "toggl" || appConfig.mode === "both";
-    const includeTempo = appConfig.mode === "tempo" || appConfig.mode === "both";
-
-    if (includeToggl && togglAdapter) {
-      tools.push(...togglTools);
-    }
-
-    if (includeTempo && tempoJiraAdapter) {
+    if (tempoJiraAdapter) {
       tools.push(...tempoTools);
-    }
-
-    // sync_toggl_range_to_tempo needs both adapters
-    if (togglAdapter && tempoJiraAdapter) {
-      tools.push(...syncTools);
     }
 
     return { tools };
@@ -381,82 +228,6 @@ async function bootstrap() {
     const args = request.params.arguments;
 
     try {
-      if (name === "log_work_entry") {
-        if (!togglAdapter) {
-          throw new McpError(ErrorCode.InvalidRequest, "Toggl is not configured. Set TOGGL_API_TOKEN in .env");
-        }
-        const input = parseLogWorkEntry(args);
-        const result = await togglAdapter.logWorkEntry(input);
-
-        return buildToolResponse({
-          ok: true,
-          action: name,
-          workspaceId: appConfig.workspaceId,
-          timezone: appConfig.timezone,
-          details: {
-            input,
-            providerResult: result
-          }
-        });
-      }
-
-      if (name === "smart_timer_control") {
-        if (!togglAdapter) {
-          throw new McpError(ErrorCode.InvalidRequest, "Toggl is not configured. Set TOGGL_API_TOKEN in .env");
-        }
-        const input = parseSmartTimerControl(args);
-        const result = await togglAdapter.smartTimerControl(input);
-
-        return buildToolResponse({
-          ok: true,
-          action: `${name}:${input.action}`,
-          workspaceId: appConfig.workspaceId,
-          timezone: appConfig.timezone,
-          details: {
-            input,
-            providerResult: result
-          }
-        });
-      }
-
-      if (name === "read_tracking_data") {
-        if (!togglAdapter) {
-          throw new McpError(ErrorCode.InvalidRequest, "Toggl is not configured. Set TOGGL_API_TOKEN in .env");
-        }
-        const input = parseReadTrackingData(args);
-        const result = await togglAdapter.readTrackingData(input);
-
-        return buildToolResponse({
-          ok: true,
-          action: name,
-          workspaceId: appConfig.workspaceId,
-          timezone: appConfig.timezone,
-          details: {
-            input,
-            providerResult: result
-          }
-        });
-      }
-
-      if (name === "update_work_entry") {
-        if (!togglAdapter) {
-          throw new McpError(ErrorCode.InvalidRequest, "Toggl is not configured. Set TOGGL_API_TOKEN in .env");
-        }
-        const input = parseUpdateWorkEntry(args);
-        const result = await togglAdapter.updateWorkEntry(input);
-
-        return buildToolResponse({
-          ok: true,
-          action: name,
-          workspaceId: appConfig.workspaceId,
-          timezone: appConfig.timezone,
-          details: {
-            input,
-            providerResult: result
-          }
-        });
-      }
-
       if (name === "tempo_create_worklog") {
         if (!tempoJiraAdapter) {
           throw new McpError(
@@ -471,7 +242,6 @@ async function bootstrap() {
         return buildToolResponse({
           ok: true,
           action: name,
-          workspaceId: appConfig.workspaceId,
           timezone: appConfig.timezone,
           details: {
             input,
@@ -494,64 +264,10 @@ async function bootstrap() {
         return buildToolResponse({
           ok: true,
           action: name,
-          workspaceId: appConfig.workspaceId,
           timezone: appConfig.timezone,
           details: {
             input,
             providerResult: result
-          }
-        });
-      }
-
-      if (name === "sync_toggl_range_to_tempo") {
-        if (!togglAdapter) {
-          throw new McpError(ErrorCode.InvalidRequest, "Toggl is not configured. Set TOGGL_API_TOKEN in .env");
-        }
-        if (!tempoJiraAdapter) {
-          throw new McpError(
-            ErrorCode.InvalidRequest,
-            "Tempo/Jira environment is not configured. Set TEMPO_API_TOKEN, JIRA_BASE_URL and JIRA_API_TOKEN."
-          );
-        }
-
-        const input = parseSyncTogglRangeToTempo(args);
-        const effectiveInput = {
-          ...input,
-          defaultIssueKey: input.defaultIssueKey ?? appConfig.defaultIssueKey,
-          defaultWorkAttributes: input.defaultWorkAttributes ?? appConfig.defaultWorkAttributes
-        };
-        const togglResult = await togglAdapter.readTrackingData({
-          timeRange: effectiveInput.timeRange
-        });
-        const syncResult = await tempoJiraAdapter.syncTogglRangeToTempo(effectiveInput, togglResult);
-
-        // Record push for session-based entries if sync succeeded
-        try {
-          const syncDetails = syncResult as Record<string, unknown>;
-          if (Array.isArray(syncDetails?.results)) {
-            const successSessionIds: string[] = [];
-            for (const r of syncDetails.results as Array<Record<string, unknown>>) {
-              if (r.status === "success" && Array.isArray(r.sessionIds)) {
-                successSessionIds.push(...(r.sessionIds as string[]));
-              }
-            }
-            if (successSessionIds.length > 0) {
-              stateManager.recordPush(successSessionIds);
-            }
-          }
-        } catch {
-          // Don't break the response if state recording fails
-        }
-
-        return buildToolResponse({
-          ok: true,
-          action: name,
-          workspaceId: appConfig.workspaceId,
-          timezone: appConfig.timezone,
-          details: {
-            input,
-            effectiveInput,
-            providerResult: syncResult
           }
         });
       }
@@ -591,7 +307,6 @@ async function bootstrap() {
         return buildToolResponse({
           ok: true,
           action: name,
-          workspaceId: appConfig.workspaceId,
           timezone: appConfig.timezone,
           details: {
             input: { from, to },
@@ -665,7 +380,6 @@ async function bootstrap() {
         return buildToolResponse({
           ok: failed === 0,
           action: name,
-          workspaceId: appConfig.workspaceId,
           timezone: appConfig.timezone,
           details: {
             pushed,
@@ -694,7 +408,6 @@ async function bootstrap() {
         return buildToolResponse({
           ok: true,
           action: name,
-          workspaceId: appConfig.workspaceId,
           timezone: appConfig.timezone,
           details: {
             deleted: tempoWorklogId,

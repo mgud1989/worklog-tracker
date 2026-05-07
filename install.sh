@@ -179,8 +179,6 @@ if ! command -v claude &>/dev/null; then
 else
   # Remove existing registration (if any) to ensure clean state
   claude mcp remove worklog-tracker -s user 2>/dev/null || true
-  # Also clean up any pre-rename registration
-  claude mcp remove toggl -s user 2>/dev/null || true
 
   if claude mcp add worklog-tracker \
     -s user \
@@ -209,7 +207,7 @@ echo -e "${BOLD}═════════════════════�
 echo ""
 echo -e "${BOLD}What was configured:${NC}"
 echo -e "  ${GREEN}*${NC} npm dependencies installed and project built"
-echo -e "  ${GREEN}*${NC} Claude Code hooks: auto-start/stop Toggl timer on session start/end"
+echo -e "  ${GREEN}*${NC} Claude Code hooks: session logger on session start/stop/activity"
 echo -e "  ${GREEN}*${NC} Session logger: tracks activity in .logs/"
 echo -e "  ${GREEN}*${NC} State file: push history persisted across sessions"
 echo -e "  ${GREEN}*${NC} Nudge system: MCP tools remind about unpushed sessions"
@@ -218,12 +216,10 @@ echo ""
 echo -e "${BOLD}${YELLOW}Action required -- fill in your tokens:${NC}"
 echo ""
 echo -e "  ${CYAN}1.${NC} Edit ${BOLD}.env${NC} with your API tokens:"
-echo -e "     ${CYAN}*${NC} Toggl   -> https://track.toggl.com/profile"
 echo -e "     ${CYAN}*${NC} Tempo   -> Tempo > Settings > API Integration"
 echo -e "     ${CYAN}*${NC} Jira    -> https://id.atlassian.com/manage-profile/security/api-tokens"
 echo ""
 echo -e "  ${CYAN}2.${NC} Edit ${BOLD}mcp.config.json${NC} with your settings:"
-echo -e "     ${CYAN}*${NC} workspaceId  -> find in Toggl URL: track.toggl.com/{workspaceId}/..."
 echo -e "     ${CYAN}*${NC} nudge config -> enable/disable push reminders (enabled by default)"
 echo ""
 echo -e "  ${CYAN}3.${NC} Restart Claude Code to pick up hooks and MCP server"

@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # ── _common.sh ────────────────────────────────────────────────────────────────
-# Shared helpers for hooks/session-logger.sh and hooks/toggl-timer-hook.sh.
+# Shared helpers for hooks/session-logger.sh.
 # Source this file — do NOT execute it directly.
 #
 # Usage (in each hook script):

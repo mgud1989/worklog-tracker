@@ -172,9 +172,9 @@ export class StateManager {
    * and reset. Worst case: a duplicate push attempt that Tempo rejects
    * via the [session:id] marker check.
    *
-   * Also deletes old monthly log files (session-YYYY-MM.log, toggl-YYYY-MM.log)
-   * that fall outside the retention window. Legacy files without a YYYY-MM
-   * suffix (session.log, toggl.log) are never touched.
+   * Also deletes old monthly log files (session-YYYY-MM.log) that fall
+   * outside the retention window. Legacy files without a YYYY-MM suffix
+   * (session.log) are never touched.
    */
   cleanup(state?: WorklogState): void {
     const current = state ?? this.load();
@@ -198,14 +198,14 @@ export class StateManager {
       return;
     }
 
-    const pattern = /^(session|toggl)-(\d{4})-(\d{2})\.log$/;
+    const pattern = /^session-(\d{4})-(\d{2})\.log$/;
 
     for (const entry of entries) {
       const match = pattern.exec(entry);
       if (!match) continue;
 
-      const fileYear = parseInt(match[2], 10);
-      const fileMonth = parseInt(match[3], 10);
+      const fileYear = parseInt(match[1], 10);
+      const fileMonth = parseInt(match[2], 10);
 
       // Month delta: positive means the file is older than current month
       const monthsDelta =

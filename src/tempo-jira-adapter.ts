@@ -1,12 +1,10 @@
 import type {
-  SyncTogglRangeToTempoInput,
   TempoCreateWorklogInput,
   TempoJiraConfig,
   TempoReadWorklogsInput
 } from "./types.js";
 
 const TEMPO_BASE_URL = "https://api.tempo.io/4";
-const TOGGL_SYNC_MARKER_PREFIX = "[toggl:";
 
 type JiraIssue = {
   id: string;
@@ -21,15 +19,6 @@ type TempoWorklog = {
   startTime?: string;
   timeSpentSeconds: number;
   description?: string;
-};
-
-type TogglEntry = {
-  id?: number;
-  description?: string;
-  start?: string;
-  stop?: string | null;
-  duration?: number;
-  tags?: string[];
 };
 
 export class TempoJiraAdapter {
@@ -87,102 +76,6 @@ export class TempoJiraAdapter {
     await this.tempoRequest(`/worklogs/${tempoWorklogId}`, {
       method: "DELETE",
     });
-  }
-
-  async syncTogglRangeToTempo(
-    input: SyncTogglRangeToTempoInput,
-    togglEntries: unknown
-  ): Promise<unknown> {
-    const entries = (Array.isArray(togglEntries) ? togglEntries : []) as TogglEntry[];
-    const closedEntries = entries.filter((entry) => entry.stop && (entry.duration ?? 0) > 0);
-
-    if (closedEntries.length === 0) {
-      return {
-        synced: 0,
-        skipped: 0,
-        failed: 0,
-        details: [],
-        message: "No closed Toggl entries found in selected range"
-      };
-    }
-
-    const accountId = await this.getCurrentUserAccountId();
-    const existingTempoWorklogs = await this.readTempoWorklogsByUser(
-      accountId,
-      this.toDateInTimezone(input.timeRange.start),
-      this.toDateInTimezone(input.timeRange.end)
-    );
-    const existingMarkers = new Set(
-      existingTempoWorklogs
-        .map((worklog) => this.extractSyncMarker(worklog.description ?? ""))
-        .filter((marker): marker is string => !!marker)
-    );
-
-    const details: Array<Record<string, unknown>> = [];
-    let synced = 0;
-    let skipped = 0;
-    let failed = 0;
-
-    for (const entry of closedEntries) {
-      const marker = `${TOGGL_SYNC_MARKER_PREFIX}${entry.id}]`;
-      if (entry.id && existingMarkers.has(String(entry.id))) {
-        skipped += 1;
-        details.push({
-          togglEntryId: entry.id,
-          status: "skipped",
-          reason: "already synced"
-        });
-        continue;
-      }
-
-      const issueKey = this.extractIssueKey(entry.description ?? "") ?? input.defaultIssueKey;
-      if (!issueKey) {
-        skipped += 1;
-        details.push({
-          togglEntryId: entry.id,
-          status: "skipped",
-          reason: "missing issue key in description and no defaultIssueKey provided"
-        });
-        continue;
-      }
-
-      try {
-        const { date, time } = this.toDateTimeInTimezone(entry.start ?? new Date().toISOString());
-        const description = `${entry.description ?? ""}${entry.id ? `\n\n${marker}` : ""}`.trim();
-
-        const created = await this.createWorklog({
-          issueKey,
-          timeSpentHours: (entry.duration ?? 0) / 3600,
-          date,
-          startTime: time,
-          description,
-          workAttributes: input.defaultWorkAttributes
-        });
-
-        synced += 1;
-        details.push({
-          togglEntryId: entry.id,
-          status: "synced",
-          issueKey,
-          tempoResult: created
-        });
-      } catch (error) {
-        failed += 1;
-        details.push({
-          togglEntryId: entry.id,
-          status: "failed",
-          issueKey,
-          error: error instanceof Error ? error.message : String(error)
-        });
-      }
-    }
-
-    return {
-      synced,
-      skipped,
-      failed,
-      details
-    };
   }
 
   private async readTempoWorklogsByUser(
@@ -453,11 +346,6 @@ export class TempoJiraAdapter {
   private extractIssueKey(value: string): string | undefined {
     const matched = value.match(/[A-Z][A-Z0-9]+-\d+/i);
     return matched?.[0]?.toUpperCase();
-  }
-
-  private extractSyncMarker(description: string): string | undefined {
-    const matched = description.match(/\[toggl:(\d+)\]/i);
-    return matched?.[1];
   }
 
   private toDateInTimezone(isoDateTime: string): string {

@@ -2,9 +2,9 @@
 # ── Setup Global Claude Code Hooks ────────────────────────────────────────────
 # Installs worklog-tracker hooks into ~/.claude/settings.json so they run on
 # EVERY project. Hooks installed:
-#   - SessionStart → session-logger (log START) + toggl-timer-hook (start timer)
+#   - SessionStart → session-logger (log START)
 #   - Stop         → session-logger (log ACTIVITY) on each agent response
-#   - SessionEnd   → session-logger (log STOP) + toggl-timer-hook (stop timer)
+#   - SessionEnd   → session-logger (log STOP)
 #   - UserPromptSubmit → run nudge-check, inject reminders into agent context
 #
 # Usage:
@@ -20,7 +20,6 @@ PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 # ── Paths ────────────────────────────────────────────────────────────────────
 CLAUDE_SETTINGS="$HOME/.claude/settings.json"
 SESSION_LOGGER="$PROJECT_DIR/hooks/session-logger.sh"
-TOGGL_HOOK="$PROJECT_DIR/hooks/toggl-timer-hook.sh"
 NUDGE_CLI="node $PROJECT_DIR/dist/cli.js nudge-check"
 
 # ── Check for jq ─────────────────────────────────────────────────────────────
@@ -30,7 +29,7 @@ if ! command -v jq &>/dev/null; then
 fi
 
 # ── Remove mode ──────────────────────────────────────────────────────────────
-# Removes BOTH the session-logger hooks AND the worklog-tracker nudge hook.
+# Removes the session-logger hooks AND the worklog-tracker nudge hook.
 if [[ "${1:-}" == "--remove" ]]; then
   if [[ ! -f "$CLAUDE_SETTINGS" ]]; then
     echo "Nothing to remove: $CLAUDE_SETTINGS not found." >&2
@@ -41,7 +40,7 @@ if [[ "${1:-}" == "--remove" ]]; then
   # is_wt_hook takes its input via pipe (`.` = the command string) rather than
   # as a named parameter — jq requires parameterless defs when used with `|`.
   if ! jq '
-    def is_wt_hook: contains("session-logger.sh") or contains("toggl-timer-hook.sh") or contains("dist/cli.js nudge-check");
+    def is_wt_hook: contains("session-logger.sh") or contains("dist/cli.js nudge-check");
     if .hooks then
       .hooks |= with_entries(
         .value |= map(
@@ -73,29 +72,21 @@ if [[ ! -x "$SESSION_LOGGER" ]]; then
   exit 1
 fi
 
-if [[ ! -x "$TOGGL_HOOK" ]]; then
-  echo "ERROR: toggl-timer-hook.sh not found or not executable at:" >&2
-  echo "  $TOGGL_HOOK" >&2
-  exit 1
-fi
-
 if [[ ! -f "$CLAUDE_SETTINGS" ]]; then
   echo "ERROR: $CLAUDE_SETTINGS not found. Is Claude Code installed?" >&2
   exit 1
 fi
 
-# ── Build hooks (session-logger + toggl-timer-hook + nudge hook) ─────────────
-# SessionStart/SessionEnd each fire TWO hooks: session-logger (pure logging) and
-# toggl-timer-hook (fire-and-forget Toggl timer start/stop).
-# Stop fires session-logger only (logs ACTIVITY on each agent response).
+# ── Build hooks (session-logger + nudge hook) ─────────────────────────────────
+# SessionStart/Stop/SessionEnd fire session-logger (pure logging).
 # UserPromptSubmit runs on every prompt the dev sends and its stdout is injected
 # into the agent's context — that's what guarantees the nudge is delivered even
 # when the agent never calls a worklog-tracker MCP tool.
 HOOKS_JSON=$(cat <<ENDJSON
 {
-  "SessionStart":     [ { "hooks": [ { "type": "command", "command": "$SESSION_LOGGER start" }, { "type": "command", "command": "$TOGGL_HOOK start" } ] } ],
+  "SessionStart":     [ { "hooks": [ { "type": "command", "command": "$SESSION_LOGGER start" } ] } ],
   "Stop":             [ { "hooks": [ { "type": "command", "command": "$SESSION_LOGGER activity" } ] } ],
-  "SessionEnd":       [ { "hooks": [ { "type": "command", "command": "$SESSION_LOGGER stop" }, { "type": "command", "command": "$TOGGL_HOOK stop" } ] } ],
+  "SessionEnd":       [ { "hooks": [ { "type": "command", "command": "$SESSION_LOGGER stop" } ] } ],
   "UserPromptSubmit": [ { "hooks": [ { "type": "command", "command": "$NUDGE_CLI" } ] } ]
 }
 ENDJSON
@@ -113,11 +104,9 @@ mv "${CLAUDE_SETTINGS}.tmp" "$CLAUDE_SETTINGS"
 
 echo ""
 echo "Hooks installed globally:"
-echo "  session-logger:    $SESSION_LOGGER"
-echo "  toggl-timer-hook:  $TOGGL_HOOK"
-echo "  nudge-check:       $NUDGE_CLI"
+echo "  session-logger:  $SESSION_LOGGER"
+echo "  nudge-check:     $NUDGE_CLI"
 echo ""
 echo "Session logs run on ALL Claude Code sessions."
-echo "Toggl timer auto-starts/stops via session hooks (fire-and-forget)."
 echo "Nudges run on every user prompt (with cross-process cooldown)."
 echo "To remove: $0 --remove"
