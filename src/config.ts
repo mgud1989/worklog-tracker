@@ -61,9 +61,8 @@ loadDotenv({ path: resolveDotenvPath() });
 const nudgeConfigSchema = z.object({
   enabled: z.boolean().optional().default(true),
   cooldownMinutes: z.number().int().positive().optional().default(30),
-  pushReminderAfterHours: z.number().positive().optional().default(4),
-  endOfDayHour: z.number().int().min(0).max(23).optional().default(19)
-}).optional().default({});
+  pushReminderAfterHours: z.number().positive().optional().default(4)
+}).strict().optional().default({});
 
 const configSchema = z.object({
   timezone: z.string().min(1, "timezone is required"),
@@ -178,7 +177,6 @@ export function loadMcpConfig(configPathFromEnv?: string): AppConfig {
       enabled: rawConfig.nudge.enabled,
       cooldownMinutes: rawConfig.nudge.cooldownMinutes,
       pushReminderAfterHours: rawConfig.nudge.pushReminderAfterHours,
-      endOfDayHour: rawConfig.nudge.endOfDayHour,
     }
   };
 }

@@ -269,6 +269,15 @@ export class StateManager {
   }
 
   /**
+   * Read-only accessor for nudge.ts: the ISO datetime of the last delivered
+   * nudge, or null if none. Used by buildNudge() for first-prompt-of-day
+   * detection (see isFirstPromptOfDay).
+   */
+  public getLastNudgeAt(): string | null {
+    return this.load().lastNudgeAt;
+  }
+
+  /**
    * Persist that a nudge was just delivered. Used together with canNudge()
    * for cross-process cooldown.
    */

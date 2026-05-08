@@ -27,7 +27,6 @@ export type NudgeConfig = {
   enabled: boolean;
   cooldownMinutes: number;
   pushReminderAfterHours: number;
-  endOfDayHour: number;
 };
 
 export type AppConfig = {

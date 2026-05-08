@@ -5,7 +5,6 @@
   "nudge": {
     "enabled": true,
     "cooldownMinutes": 30,
-    "pushReminderAfterHours": 4,
-    "endOfDayHour": 19
+    "pushReminderAfterHours": 4
   }
 }
