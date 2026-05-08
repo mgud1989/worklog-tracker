@@ -96,3 +96,56 @@ export type TempoPushResult = {
   failed: number;
   details: Array<{ issueKey: string; status: string; error?: string }>;
 };
+
+// --- Session status tracking ---
+
+/**
+ * Persisted status — only "pushed" or "skipped" are ever written to disk.
+ * "pending" is implicit (absent from sessions[]) and is a DERIVED/TRANSIENT value only.
+ */
+export type PersistedSessionStatus = "pushed" | "skipped";
+
+/**
+ * Wider union that includes the derived "pending" state.
+ * Use this as the return type wherever callers receive session status values,
+ * including listSessions() and the MCP tool responses.
+ * Never persist "pending" — it must not appear in SessionRecord.status on disk.
+ */
+export type SessionStatus = "pushed" | "skipped" | "pending";
+
+export interface SessionRecord {
+  id: string;
+  /**
+   * Persisted status only. Use PersistedSessionStatus to be explicit at the
+   * persistence boundary; callers that return derived/pending state use SessionStatus.
+   */
+  status: PersistedSessionStatus;
+  at: string; // ISO datetime — push-time or skip-time
+}
+
+/**
+ * Wide session record for derived / return-type contexts.
+ * Same shape as SessionRecord but status includes "pending".
+ * Never serialized to disk — use SessionRecord (with PersistedSessionStatus) for that.
+ */
+export interface SessionStatusRecord {
+  id: string;
+  status: SessionStatus;
+  at: string;
+}
+
+export interface SessionStatusEntry {
+  id: string;
+  branch: string;
+  hours: number;
+  date: string;   // YYYY-MM-DD from log line
+  status: SessionStatus;
+  at?: string;    // present only for pushed/skipped
+}
+
+export interface WorklogState {
+  lastPushAt: string | null;       // ISO datetime of last Tempo push
+  sessions: SessionRecord[];       // replaces pushedSessionIds
+  lastCleanedAt: string;           // ISO date (YYYY-MM-DD) of last cleanup
+  lastNudgeAt: string | null;      // ISO datetime of last hook-delivered nudge (cross-process cooldown)
+}

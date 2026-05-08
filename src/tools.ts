@@ -46,52 +46,27 @@ export function parseTempoReadWorklogs(args: unknown): TempoReadWorklogsInput {
 
 // --- Tempo Push schemas ---
 
-export const previewTempoPushSchema = z
-  .object({
-    date: z
-      .string()
-      .regex(/^(\d{4}-\d{2}-\d{2}|today)$/, "date must be YYYY-MM-DD or 'today'")
-      .optional(),
-    from: dateSchema.optional(),
-    to: dateSchema.optional()
-  })
-  .superRefine((value, ctx) => {
-    const hasDate = value.date !== undefined;
-    const hasRange = value.from !== undefined || value.to !== undefined;
+// superRefine removed per spec §preview_tempo_push Default Window + design D6.
+// All three fields are optional. Cross-field validation moved to the handler in index.ts.
+// When all are absent, handler defaults to retention window [retentionStart, today].
+export const previewTempoPushSchema = z.object({
+  date: z
+    .string()
+    .regex(/^(\d{4}-\d{2}-\d{2}|today)$/, "date must be YYYY-MM-DD or 'today'")
+    .optional(),
+  from: dateSchema.optional(),
+  to: dateSchema.optional(),
+});
 
-    if (!hasDate && !hasRange) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: "Either 'date' or both 'from' and 'to' are required"
-      });
-      return;
-    }
+// --- Session status schemas ---
 
-    if (hasDate && hasRange) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: "Cannot specify both 'date' and 'from'/'to' range"
-      });
-      return;
-    }
+export const markSessionSkippedSchema = z.object({
+  sessionId: z.string().min(1),
+});
 
-    if (hasRange) {
-      if (!value.from || !value.to) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: "Both 'from' and 'to' are required when using a date range"
-        });
-        return;
-      }
-
-      if (new Date(value.to).getTime() < new Date(value.from).getTime()) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: "'to' must be greater than or equal to 'from'"
-        });
-      }
-    }
-  });
+export const listSessionStatusSchema = z.object({
+  status: z.enum(["pushed", "skipped", "pending"]).optional(),
+});
 
 const consolidatedWorklogSchema = z.object({
   issueKey: z.string().min(1),
@@ -110,6 +85,8 @@ export const pushTempoWorklogsSchema = z.object({
 });
 
 export type PreviewTempoPushInput = z.infer<typeof previewTempoPushSchema>;
+export type MarkSessionSkippedInput = z.infer<typeof markSessionSkippedSchema>;
+export type ListSessionStatusInput = z.infer<typeof listSessionStatusSchema>;
 
 export type PushTempoWorklogsInput = {
   worklogs: ConsolidatedWorklog[];
@@ -117,6 +94,14 @@ export type PushTempoWorklogsInput = {
 
 export function parsePreviewTempoPush(args: unknown): PreviewTempoPushInput {
   return previewTempoPushSchema.parse(args);
+}
+
+export function parseMarkSessionSkipped(args: unknown): MarkSessionSkippedInput {
+  return markSessionSkippedSchema.parse(args);
+}
+
+export function parseListSessionStatus(args: unknown): ListSessionStatusInput {
+  return listSessionStatusSchema.parse(args);
 }
 
 export function parsePushTempoWorklogs(args: unknown): PushTempoWorklogsInput {

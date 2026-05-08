@@ -1,21 +1,14 @@
 import { existsSync, readdirSync, rmSync, readFileSync, writeFileSync, renameSync } from "node:fs";
 import { join } from "node:path";
-
-// ─── Types ────────────────────────────────────────────────────────────
-
-export interface WorklogState {
-  lastPushAt: string | null;       // ISO datetime of last Tempo push
-  pushedSessionIds: string[];      // Session IDs already pushed to Tempo
-  lastCleanedAt: string;           // ISO date (YYYY-MM-DD) of last cleanup
-  lastNudgeAt: string | null;      // ISO datetime of last hook-delivered nudge (cross-process cooldown)
-}
+import { parseSessionLogs } from "./session-log-parser.js";
+import type { WorklogState, SessionRecord, SessionStatus, SessionStatusRecord, PersistedSessionStatus } from "./types.js";
 
 // ─── Defaults ─────────────────────────────────────────────────────────
 
 function createDefaultState(): WorklogState {
   return {
     lastPushAt: null,
-    pushedSessionIds: [],
+    sessions: [],
     lastCleanedAt: new Date().toISOString().slice(0, 10),
     lastNudgeAt: null,
   };
@@ -31,6 +24,10 @@ function getCurrentMonth(): string {
 function getMonthFromDate(dateStr: string): string {
   // Expects YYYY-MM-DD format
   return dateStr.slice(0, 7);
+}
+
+function getTodayYMD(): string {
+  return new Date().toISOString().slice(0, 10);
 }
 
 // ─── StateManager ─────────────────────────────────────────────────────
@@ -49,7 +46,20 @@ export class StateManager {
   }
 
   /**
+   * Returns the YYYY-MM-DD of the first day of the retention window:
+   * first day of (currentMonth - logRetentionMonths + 1).
+   *
+   * Public so nudge.ts can consume it without duplicating the formula.
+   */
+  public retentionStartDate(): string {
+    const now = new Date();
+    const start = new Date(now.getFullYear(), now.getMonth() - (this.logRetentionMonths - 1), 1);
+    return start.toISOString().slice(0, 10);
+  }
+
+  /**
    * Read state from disk. Returns defaults if file is missing or corrupted.
+   * Triggers one-shot migration from legacy pushedSessionIds if present.
    * Triggers cleanup if lastCleanedAt is from a different month.
    */
   load(): WorklogState {
@@ -63,13 +73,37 @@ export class StateManager {
       const raw = readFileSync(this.statePath, "utf8");
       const parsed = JSON.parse(raw);
 
+      // ─── One-shot migration: pushedSessionIds → sessions[] ────────────
+      // Condition: legacy field is present AND new field is absent.
+      // No version negotiation per #327 (no-backcompat).
+      if (Array.isArray(parsed.pushedSessionIds) && !Array.isArray(parsed.sessions)) {
+        const at =
+          typeof parsed.lastCleanedAt === "string"
+            ? `${parsed.lastCleanedAt}T00:00:00.000Z`
+            : new Date().toISOString();
+        parsed.sessions = (parsed.pushedSessionIds as unknown[])
+          .filter((id): id is string => typeof id === "string")
+          .map((id) => ({ id, status: "pushed" as PersistedSessionStatus, at }));
+        delete parsed.pushedSessionIds;
+        // Save immediately so subsequent loads skip migration.
+        writeFileSync(this.tmpPath, JSON.stringify(parsed, null, 2), "utf8");
+        renameSync(this.tmpPath, this.statePath);
+      }
+
       // Validate shape — fill in missing fields with defaults
       const defaults = createDefaultState();
       state = {
         lastPushAt: typeof parsed.lastPushAt === "string" ? parsed.lastPushAt : defaults.lastPushAt,
-        pushedSessionIds: Array.isArray(parsed.pushedSessionIds)
-          ? parsed.pushedSessionIds.filter((id: unknown) => typeof id === "string")
-          : defaults.pushedSessionIds,
+        sessions: Array.isArray(parsed.sessions)
+          ? (parsed.sessions as unknown[]).filter(
+              (s): s is SessionRecord =>
+                typeof s === "object" &&
+                s !== null &&
+                typeof (s as SessionRecord).id === "string" &&
+                ((s as SessionRecord).status === "pushed" || (s as SessionRecord).status === "skipped") &&
+                typeof (s as SessionRecord).at === "string"
+            )
+          : defaults.sessions,
         lastCleanedAt: typeof parsed.lastCleanedAt === "string" ? parsed.lastCleanedAt : defaults.lastCleanedAt,
         lastNudgeAt: typeof parsed.lastNudgeAt === "string" ? parsed.lastNudgeAt : defaults.lastNudgeAt,
       };
@@ -100,17 +134,30 @@ export class StateManager {
   }
 
   /**
-   * Record a successful push: update lastPushAt, add session IDs, persist.
+   * Record a successful push: update lastPushAt, add/update session records.
+   * - New id → append { id, status: "pushed", at: now }
+   * - Already "pushed" → no-op (idempotent)
+   * - Already "skipped" → overwrite to "pushed" (skip-then-push race; push wins per decision #4)
+   *   and emit a stderr warning.
+   *
+   * Does NOT call regenStatusMd — caller (handler in index.ts) is responsible.
    */
   recordPush(sessionIds: string[]): void {
     const state = this.load();
     state.lastPushAt = new Date().toISOString();
+    const now = new Date().toISOString();
 
-    // Add only new session IDs (avoid duplicates)
-    const existing = new Set(state.pushedSessionIds);
     for (const id of sessionIds) {
-      if (!existing.has(id)) {
-        state.pushedSessionIds.push(id);
+      const existing = state.sessions.find((s) => s.id === id);
+      if (!existing) {
+        state.sessions.push({ id, status: "pushed", at: now });
+      } else if (existing.status === "pushed") {
+        // Already pushed — no-op
+      } else {
+        // status === "skipped" — push wins
+        console.error(`[state-manager] Warning: session ${id} was skipped but is now being pushed. Overwriting status.`);
+        existing.status = "pushed";
+        existing.at = now;
       }
     }
 
@@ -118,11 +165,76 @@ export class StateManager {
   }
 
   /**
+   * Mark a session as skipped.
+   * - Already "pushed" → throw (decision #4: pushed↔skipped are mutually exclusive; push wins)
+   * - Already "skipped" → no-op (idempotent re-skip)
+   * - Not in sessions[] → append { id, status: "skipped", at }
+   *
+   * Caller (handler in index.ts) is responsible for validating that sessionId
+   * exists in logs and for calling regenStatusMd after success.
+   */
+  recordSkipped(sessionId: string, at: string): void {
+    const state = this.load();
+    const existing = state.sessions.find((s) => s.id === sessionId);
+
+    if (existing?.status === "pushed") {
+      throw new Error(`session already pushed: ${sessionId}`);
+    }
+
+    if (existing?.status === "skipped") {
+      // Idempotent — already skipped, nothing to do
+      return;
+    }
+
+    state.sessions.push({ id: sessionId, status: "skipped", at });
+    this.save(state);
+  }
+
+  /**
+   * Get the status of a session.
+   * O(N) scan over sessions[]; returns "pending" if not found.
+   */
+  getSessionStatus(sessionId: string): "pushed" | "skipped" | "pending" {
+    const state = this.load();
+    const record = state.sessions.find((s) => s.id === sessionId);
+    return record?.status ?? "pending";
+  }
+
+  /**
+   * List sessions by filter. Returns SessionStatusRecord[] (wide union — includes "pending").
+   * - "pushed" / "skipped": filter sessions[] by status
+   * - "pending": requires caller-supplied logIds (to keep state-manager free of parser dep).
+   *   Returns synthetic { id, status: "pending", at: "" } for each logId not in sessions[].
+   * - undefined: returns all sessions[] (status is always pushed|skipped for persisted records)
+   *
+   * Note: "pending" records are synthetic / transient — they are NEVER saved to disk.
+   * The persistence boundary in load() rejects any record with status "pending".
+   */
+  listSessions(filter?: SessionStatus, logIds?: string[]): SessionStatusRecord[] {
+    const state = this.load();
+
+    if (filter === "pending") {
+      if (!logIds) return [];
+      const knownIds = new Set(state.sessions.map((s) => s.id));
+      return logIds
+        .filter((id) => !knownIds.has(id))
+        .map((id): SessionStatusRecord => ({ id, status: "pending", at: "" }));
+    }
+
+    if (filter === "pushed" || filter === "skipped") {
+      return state.sessions.filter((s) => s.status === filter);
+    }
+
+    // No filter — return all persisted records (PersistedSessionStatus ⊆ SessionStatus)
+    return state.sessions;
+  }
+
+  /**
    * Check if a session was already pushed to Tempo.
+   * @deprecated Use getSessionStatus() instead.
    */
   isSessionPushed(sessionId: string): boolean {
-    const state = this.load();
-    return state.pushedSessionIds.includes(sessionId);
+    return this.getSessionStatus(sessionId) === "pushed";
   }
 
   /**
@@ -167,10 +279,8 @@ export class StateManager {
   }
 
   /**
-   * Prune pushedSessionIds when the month changes.
-   * Since individual session IDs don't carry timestamps, we prune ALL
-   * and reset. Worst case: a duplicate push attempt that Tempo rejects
-   * via the [session:id] marker check.
+   * Prune sessions[] by intersecting with log IDs parsed over [retentionStart, today].
+   * Sessions whose IDs no longer appear in any surviving log file are dropped.
    *
    * Also deletes old monthly log files (session-YYYY-MM.log) that fall
    * outside the retention window. Legacy files without a YYYY-MM suffix
@@ -178,8 +288,19 @@ export class StateManager {
    */
   cleanup(state?: WorklogState): void {
     const current = state ?? this.load();
-    current.pushedSessionIds = [];
-    current.lastCleanedAt = new Date().toISOString().slice(0, 10);
+    const today = getTodayYMD();
+    const retentionStart = this.retentionStartDate();
+
+    let logIds: Set<string>;
+    try {
+      const entries = parseSessionLogs(this.dir, retentionStart, today);
+      logIds = new Set(entries.map((e) => e.sessionId).filter(Boolean));
+    } catch {
+      logIds = new Set();
+    }
+
+    current.sessions = current.sessions.filter((s) => logIds.has(s.id));
+    current.lastCleanedAt = today;
     this.save(current);
     this.pruneLogFiles();
   }

@@ -1,6 +1,7 @@
 import type { StateManager } from "./state-manager.js";
 import type { NudgeConfig } from "./types.js";
 import { parseSessionLogs } from "./session-log-parser.js";
+import type { LogEntry } from "./types.js";
 
 // ─── Types ────────────────────────────────────────────────────────────
 
@@ -39,41 +40,66 @@ function getTodayInTimezone(timezone: string): string {
 }
 
 /**
- * Count unpushed sessions from today by parsing session logs
- * and filtering out already-pushed session IDs.
+ * Find the oldest pending session's date string (YYYY-MM-DD), or null if none.
+ * "Pending" = sessionId appears in logs AND has no entry in sessions[] with
+ * status "pushed" or "skipped".
+ *
+ * Entries are already sorted chronologically by parseSessionLogs, so the
+ * first pending session ID we encounter corresponds to the oldest pending date.
+ */
+export function findOldestPending(
+  entries: LogEntry[],
+  stateManager: StateManager,
+): string | null {
+  for (const entry of entries) {
+    const sid = entry.sessionId;
+    if (!sid) continue;
+    if (stateManager.getSessionStatus(sid) === "pending") {
+      return entry.timestamp.toISOString().slice(0, 10);
+    }
+  }
+  return null;
+}
+
+/**
+ * Count unpushed sessions within the full retention window by parsing session logs
+ * and filtering out sessions already pushed or skipped.
+ *
+ * Returns { count, oldestPendingDate } where oldestPendingDate is null if no pending sessions.
  */
 function countUnpushedSessions(
   sessionLogDir: string,
-  timezone: string,
-  pushedSessionIds: string[],
-): number {
-  const today = getTodayInTimezone(timezone);
+  stateManager: StateManager,
+): { count: number; oldestPendingDate: string | null } {
+  const retentionStart = stateManager.retentionStartDate();
+  const today = new Date().toISOString().slice(0, 10);
 
-  let entries;
+  let entries: LogEntry[];
   try {
-    entries = parseSessionLogs(sessionLogDir, today, today);
+    entries = parseSessionLogs(sessionLogDir, retentionStart, today);
   } catch {
-    return 0;
+    return { count: 0, oldestPendingDate: null };
   }
 
-  // Extract unique session IDs from today's log entries
-  const todaySessionIds = new Set<string>();
+  // Extract unique session IDs within retention window
+  const windowSessionIds = new Set<string>();
   for (const entry of entries) {
     if (entry.sessionId) {
-      todaySessionIds.add(entry.sessionId);
+      windowSessionIds.add(entry.sessionId);
     }
   }
 
-  // Filter out already-pushed sessions
-  const pushedSet = new Set(pushedSessionIds);
-  let unpushedCount = 0;
-  for (const id of todaySessionIds) {
-    if (!pushedSet.has(id)) {
-      unpushedCount++;
+  // Count pending sessions (not pushed, not skipped)
+  let pendingCount = 0;
+  for (const id of windowSessionIds) {
+    if (stateManager.getSessionStatus(id) === "pending") {
+      pendingCount++;
     }
   }
 
-  return unpushedCount;
+  const oldestPendingDate = pendingCount > 0 ? findOldestPending(entries, stateManager) : null;
+
+  return { count: pendingCount, oldestPendingDate };
 }
 
 // ─── Main ─────────────────────────────────────────────────────────────
@@ -85,20 +111,22 @@ function countUnpushedSessions(
  * Conditions (checked in priority order):
  * 1. Unpushed sessions + hours since last push > pushReminderAfterHours
  * 2. End of workday + any unpushed sessions
+ *
+ * Nudge message includes "oldest pending: YYYY-MM-DD" when pending sessions exist.
  */
 export function buildNudge(ctx: NudgeContext): string | null {
   const { stateManager, timezone, sessionLogDir, nudgeConfig } = ctx;
 
   if (!nudgeConfig.enabled) return null;
 
-  const state = stateManager.load();
-  const unpushedCount = countUnpushedSessions(
+  const { count: unpushedCount, oldestPendingDate } = countUnpushedSessions(
     sessionLogDir,
-    timezone,
-    state.pushedSessionIds,
+    stateManager,
   );
 
   if (unpushedCount === 0) return null;
+
+  const oldestLine = oldestPendingDate ? `\noldest pending: ${oldestPendingDate}` : "";
 
   // Condition 1: Unpushed sessions AND hours since last push > threshold (or never pushed)
   const { lastPushAt, hoursSinceLastPush } = stateManager.getUnpushedInfo();
@@ -111,14 +139,14 @@ export function buildNudge(ctx: NudgeContext): string | null {
         ? "never"
         : `${hoursSinceLastPush} hours ago`;
     const sessionLabel = unpushedCount === 1 ? "session" : "sessions";
-    return `\n\n\u23F0 You have ${unpushedCount} unpushed ${sessionLabel} from today. Last push: ${lastPushText}. Consider running preview_tempo_push to review and push.`;
+    return `\n\n⏰ You have ${unpushedCount} unpushed ${sessionLabel}. Last push: ${lastPushText}. Consider running preview_tempo_push to review and push.${oldestLine}`;
   }
 
   // Condition 2: End of workday + any unpushed sessions
   const localHour = getLocalHour(timezone);
   if (localHour >= nudgeConfig.endOfDayHour) {
     const sessionLabel = unpushedCount === 1 ? "session" : "sessions";
-    return `\n\n\uD83D\uDD50 End of workday \u2014 you have ${unpushedCount} unpushed ${sessionLabel} from today. Run preview_tempo_push before wrapping up.`;
+    return `\n\n🕐 End of workday — you have ${unpushedCount} unpushed ${sessionLabel}. Run preview_tempo_push before wrapping up.${oldestLine}`;
   }
 
   return null;

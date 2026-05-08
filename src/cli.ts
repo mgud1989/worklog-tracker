@@ -9,6 +9,7 @@ import {
   filterAlreadyPushed,
 } from "./session-consolidator.js";
 import { StateManager } from "./state-manager.js";
+import { regenStatusMd } from "./status-md.js";
 import { TempoJiraAdapter } from "./tempo-jira-adapter.js";
 import type { TempoPushResult } from "./types.js";
 
@@ -61,10 +62,9 @@ function parseTempoPushFlags(flags: string[]): TempoPushFlags {
     process.exit(1);
   }
 
-  // Default to today if nothing specified
-  if (!result.date && !result.from) {
-    result.date = "today";
-  }
+  // No default applied here: the MCP handler (index.ts) resolves
+  // all-empty input to the retention window. CLI passes flags through as-is.
+  // (Removed "today" default per spec § preview_tempo_push Default Window)
 
   return result;
 }
@@ -82,28 +82,33 @@ function resolveLogDir(): string {
   return join(projectRoot, ".logs");
 }
 
-function resolveDateRange(flags: TempoPushFlags): { from: string; to: string } {
+function resolveDateRange(flags: TempoPushFlags, stateManager: StateManager): { from: string; to: string } {
   if (flags.from && flags.to) {
     return { from: flags.from, to: flags.to };
   }
 
-  // --date (or default "today")
-  const dateStr = flags.date ?? "today";
-  let resolved: string;
-
-  if (dateStr === "today") {
-    resolved = formatDateYMD(new Date());
-  } else {
-    // Validate YYYY-MM-DD
-    const parsed = new Date(dateStr);
-    if (Number.isNaN(parsed.getTime())) {
-      process.stderr.write(`Invalid date: ${dateStr}. Use YYYY-MM-DD or "today"\n`);
-      process.exit(1);
+  // --date given explicitly
+  if (flags.date) {
+    let resolved: string;
+    if (flags.date === "today") {
+      resolved = formatDateYMD(new Date());
+    } else {
+      // Validate YYYY-MM-DD
+      const parsed = new Date(flags.date);
+      if (Number.isNaN(parsed.getTime())) {
+        process.stderr.write(`Invalid date: ${flags.date}. Use YYYY-MM-DD or "today"\n`);
+        process.exit(1);
+      }
+      resolved = flags.date;
     }
-    resolved = dateStr;
+    return { from: resolved, to: resolved };
   }
 
-  return { from: resolved, to: resolved };
+  // No --date / --from / --to: default to the full retention window (mirrors MCP preview_tempo_push
+  // empty-input behavior per spec § preview_tempo_push Default Window, decision #8).
+  const today = formatDateYMD(new Date());
+  const retentionStart = stateManager.retentionStartDate();
+  return { from: retentionStart, to: today };
 }
 
 function formatDateYMD(date: Date): string {
@@ -174,11 +179,16 @@ function truncate(str: string, maxLen: number): string {
 
 async function runTempoPushCommand(flags: string[]): Promise<void> {
   const pushFlags = parseTempoPushFlags(flags);
-  const { from, to } = resolveDateRange(pushFlags);
 
   const logDir = resolveLogDir();
   const appConfig = loadMcpConfig(resolveConfigPath());
   const env = loadAndValidateEnv();
+
+  // StateManager must be initialized before resolveDateRange so that the
+  // no-flags default can use the retention window (W2.1 fix).
+  const stateManager = new StateManager(logDir, appConfig.logRetentionMonths);
+
+  const { from, to } = resolveDateRange(pushFlags, stateManager);
 
   if (!env.tempoJiraConfig) {
     process.stderr.write(
@@ -260,6 +270,9 @@ async function runTempoPushCommand(flags: string[]): Promise<void> {
     process.stdout.write(`Skipping ${unmappedCount} worklog(s) with no issue key.\n`);
   }
 
+  // Track which session IDs were successfully pushed so we can update local state.
+  const successfulSessionIds: string[] = [];
+
   for (const worklog of pushable) {
     try {
       await tempoAdapter.createWorklog({
@@ -273,6 +286,8 @@ async function runTempoPushCommand(flags: string[]): Promise<void> {
 
       result.pushed += 1;
       result.details.push({ issueKey: worklog.issueKey, status: "pushed" });
+      // Collect session IDs for state recording (mirrors MCP push_tempo_worklogs handler).
+      successfulSessionIds.push(...worklog.sessionIds);
       process.stdout.write(`  ✓ ${worklog.issueKey} — ${worklog.date} — ${formatHours(worklog.durationHours)}\n`);
     } catch (error) {
       result.failed += 1;
@@ -282,7 +297,20 @@ async function runTempoPushCommand(flags: string[]): Promise<void> {
     }
   }
 
-  // Step 7: Print summary
+  // Step 7: Record successful session IDs in state and regenerate status.md.
+  // Mirrors the MCP push_tempo_worklogs handler post-push state update (index.ts:444-456).
+  if (successfulSessionIds.length > 0) {
+    try {
+      stateManager.recordPush(successfulSessionIds);
+      const pushToday = formatDateYMD(new Date());
+      regenStatusMd(stateManager, logDir, stateManager.retentionStartDate(), pushToday, appConfig.timezone);
+    } catch {
+      // Don't fail the CLI on state recording errors — push already succeeded.
+      process.stderr.write("Warning: Could not update local session state after push.\n");
+    }
+  }
+
+  // Step 8: Print summary
   process.stdout.write("\n");
   process.stdout.write(`Done: ${result.pushed} pushed, ${result.skipped} skipped, ${result.failed} failed\n`);
 

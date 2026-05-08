@@ -18,8 +18,11 @@ import {
   parsePreviewTempoPush,
   parsePushTempoWorklogs,
   parseTempoCreateWorklog,
-  parseTempoReadWorklogs
+  parseTempoReadWorklogs,
+  parseMarkSessionSkipped,
+  parseListSessionStatus,
 } from "./tools.js";
+import { regenStatusMd, buildSessionStatusEntries } from "./status-md.js";
 
 /**
  * Resolve the session-logs directory relative to the MCP config file location.
@@ -189,7 +192,7 @@ async function bootstrap() {
     {
       name: "preview_tempo_push",
       description:
-        "Preview session-based worklogs before pushing to Tempo. Parses session logs, consolidates by branch/day, and returns a preview with issue keys, hours, and duplicate detection.",
+        "Preview session-based worklogs before pushing to Tempo. Parses session logs, consolidates by branch/day, and returns a preview with issue keys, hours, and duplicate detection. When called with no arguments, defaults to the full retention window excluding already-pushed or skipped sessions.",
       inputSchema: {
         type: "object" as const,
         properties: {
@@ -204,6 +207,38 @@ async function bootstrap() {
           to: {
             type: "string",
             description: "Range end: 'YYYY-MM-DD'"
+          }
+        },
+        additionalProperties: false
+      }
+    },
+    {
+      name: "mark_session_skipped",
+      description:
+        "Mark a session as intentionally skipped (not pushed to Tempo). The session must exist in log files within the retention window and must not have been already pushed. Idempotent: re-skipping an already-skipped session succeeds with no change. Regenerates .logs/status.md.",
+      inputSchema: {
+        type: "object" as const,
+        properties: {
+          sessionId: {
+            type: "string",
+            description: "Session ID to mark as skipped"
+          }
+        },
+        required: ["sessionId"],
+        additionalProperties: false
+      }
+    },
+    {
+      name: "list_session_status",
+      description:
+        "List per-session push status for sessions in the retention window. Optionally filter by status: pushed, skipped, or pending. Regenerates .logs/status.md as a side effect and returns its path.",
+      inputSchema: {
+        type: "object" as const,
+        properties: {
+          status: {
+            type: "string",
+            enum: ["pushed", "skipped", "pending"],
+            description: "Optional status filter"
           }
         },
         additionalProperties: false
@@ -274,15 +309,55 @@ async function bootstrap() {
 
       if (name === "preview_tempo_push") {
         const input = parsePreviewTempoPush(args);
-        const { from, to } = resolveDateInput(input);
+
+        // Handler-side cross-field validation (moved from superRefine per design D6)
+        const hasDate = input.date !== undefined;
+        const hasFrom = input.from !== undefined;
+        const hasTo = input.to !== undefined;
+
+        if (hasDate && (hasFrom || hasTo)) {
+          throw new McpError(ErrorCode.InvalidParams, "Cannot specify both 'date' and 'from'/'to' range");
+        }
+        if (hasFrom !== hasTo) {
+          throw new McpError(ErrorCode.InvalidParams, "Both 'from' and 'to' are required when using a date range");
+        }
+        if (hasFrom && hasTo && input.to! < input.from!) {
+          throw new McpError(ErrorCode.InvalidParams, "'to' must be greater than or equal to 'from'");
+        }
+
+        // Resolve date range: if all empty → retention window default (spec scenario 8)
+        let from: string;
+        let to: string;
+        const today = new Date().toISOString().slice(0, 10);
+
+        if (!hasDate && !hasFrom && !hasTo) {
+          from = stateManager.retentionStartDate();
+          to = today;
+        } else {
+          ({ from, to } = resolveDateInput(input));
+        }
+
         const logDir = resolveSessionLogDir();
         const entries = parseSessionLogs(logDir, from, to);
-        const worklogs = consolidateSessions(entries, {
+
+        // When using retention window default: filter out sessions already pushed/skipped
+        // locally. This gives a clean "what do I still need to push?" view (spec scenario 8).
+        let filteredEntries = entries;
+        const isDefaultWindow = !hasDate && !hasFrom && !hasTo;
+        if (isDefaultWindow) {
+          const logIds = [...new Set(entries.map((e) => e.sessionId).filter(Boolean))];
+          const pendingIds = new Set(
+            logIds.filter((id) => stateManager.getSessionStatus(id) === "pending")
+          );
+          filteredEntries = entries.filter((e) => !e.sessionId || pendingIds.has(e.sessionId));
+        }
+
+        const worklogs = consolidateSessions(filteredEntries, {
           inactivityThresholdMinutes: appConfig.inactivityThresholdMinutes,
           defaultIssueKey: appConfig.defaultIssueKey,
         });
 
-        // Filter out already-pushed worklogs
+        // Filter out already-pushed worklogs via Tempo description markers
         let alreadyPushedCount = 0;
         let toPush = worklogs;
         if (tempoJiraAdapter) {
@@ -365,13 +440,17 @@ async function bootstrap() {
         const pushed = results.filter((r) => r.status === "success").length;
         const failed = results.filter((r) => r.status === "failed").length;
 
-        // Record successful pushes in state manager
+        // Record successful pushes in state manager, then regen status.md
         if (pushed > 0) {
           try {
             const successSessionIds = input.worklogs
               .filter((_, i) => results[i].status === "success")
               .flatMap((w) => w.sessionIds);
             stateManager.recordPush(successSessionIds);
+            // Regen status.md after recording push (spec cross-cutting note; design D8)
+            const pushLogDir = resolveSessionLogDir();
+            const pushToday = new Date().toISOString().slice(0, 10);
+            regenStatusMd(stateManager, pushLogDir, stateManager.retentionStartDate(), pushToday, appConfig.timezone);
           } catch {
             // Don't break the response if state recording fails
           }
@@ -412,6 +491,77 @@ async function bootstrap() {
           details: {
             deleted: tempoWorklogId,
           },
+        });
+      }
+
+      if (name === "mark_session_skipped") {
+        const input = parseMarkSessionSkipped(args);
+        const { sessionId } = input;
+
+        const skipToday = new Date().toISOString().slice(0, 10);
+        const skipLogDir = resolveSessionLogDir();
+        const retentionStart = stateManager.retentionStartDate();
+
+        // Validate: sessionId must exist in logs within [retentionStart, today] (spec scenario 6)
+        const logIds = new Set(
+          parseSessionLogs(skipLogDir, retentionStart, skipToday)
+            .map((e) => e.sessionId)
+            .filter(Boolean)
+        );
+        if (!logIds.has(sessionId)) {
+          throw new McpError(
+            ErrorCode.InvalidParams,
+            `Session not found in log files within retention window: ${sessionId}`
+          );
+        }
+
+        // Validate: must not already be pushed (spec scenario 5; recordSkipped throws if pushed)
+        try {
+          stateManager.recordSkipped(sessionId, new Date().toISOString());
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          throw new McpError(ErrorCode.InvalidRequest, msg);
+        }
+
+        // Regen status.md (spec scenario 4; design D8)
+        regenStatusMd(stateManager, skipLogDir, retentionStart, skipToday, appConfig.timezone);
+
+        return buildToolResponse({
+          ok: true,
+          action: name,
+          timezone: appConfig.timezone,
+          details: { sessionId, skipped: true },
+        });
+      }
+
+      if (name === "list_session_status") {
+        const input = parseListSessionStatus(args);
+        const listToday = new Date().toISOString().slice(0, 10);
+        const listLogDir = resolveSessionLogDir();
+        const listRetentionStart = stateManager.retentionStartDate();
+
+        const allEntries = buildSessionStatusEntries(
+          stateManager,
+          listLogDir,
+          listRetentionStart,
+          listToday,
+          appConfig.timezone,
+        );
+        const entries = input.status
+          ? allEntries.filter((e) => e.status === input.status)
+          : allEntries;
+
+        // Regen status.md as a side effect (spec requirement; design D8).
+        // Always renders the full set, ignoring the response filter.
+        regenStatusMd(stateManager, listLogDir, listRetentionStart, listToday, appConfig.timezone);
+
+        const statusFilePath = `${listLogDir}/status.md`;
+
+        return buildToolResponse({
+          ok: true,
+          action: name,
+          timezone: appConfig.timezone,
+          details: { entries, statusFilePath },
         });
       }
 
