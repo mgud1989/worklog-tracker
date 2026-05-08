@@ -37,9 +37,9 @@ Use `tempo_delete_worklog` if a bad push needs reverting (find the ID via `tempo
 ## Nudge System
 
 `UserPromptSubmit` hook runs `nudge-check` and injects reminders into your context when:
-- There are unpushed sessions older than `pushReminderAfterHours` (default 4h)
-- It's past `endOfDayHour` (default 19)
-- Cooldown of `cooldownMinutes` (default 30) has elapsed since the last nudge
+- It's the dev's first prompt of the calendar day → morning greeting (with or without pending sessions)
+- After that, if there are unpushed sessions AND more than `pushReminderAfterHours` (default 4h) have passed since the last push
+- Cooldown of `cooldownMinutes` (default 30) gates back-to-back nudges
 
 When you see a nudge:
 1. Mention it naturally to the dev ("By the way, you have unpushed sessions from today")

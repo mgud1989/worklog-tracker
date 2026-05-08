@@ -19,13 +19,14 @@ git clone <repo-url> && cd worklog-tracker
 1. Verifica node v20+, npm, jq
 2. Instala dependencias y compila a `dist/`
 3. Crea `.env` y `mcp.config.json` desde los ejemplos (no los pisa)
-4. Instala hooks globales en `~/.claude/settings.json`
-5. Registra el MCP server en Claude Code (`claude mcp add worklog-tracker -s user`)
+4. Mergea hooks globales en `~/.claude/settings.json` (preserva otros hooks que tengas)
+5. Symlinkea la skill a `~/.claude/skills/worklog-tracker/SKILL.md` (futuras updates por `git pull`)
+6. Registra el MCP server en Claude Code (`claude mcp add worklog-tracker -s user`)
 
 Después editás:
 1. **`.env`** — tokens de Tempo, Jira
 2. **`mcp.config.json`** — `defaultIssueKey`, etc.
-3. Reiniciás Claude Code para que tome los hooks y el MCP server.
+3. Reiniciás Claude Code para que tome los hooks, la skill y el MCP server.
 
 ## Configuración
 
@@ -51,11 +52,11 @@ El loader busca `.env` en este orden: `DOTENV_PATH` > junto a `MCP_CONFIG_PATH` 
   "defaultIssueKey": "INFRAV2-543",
   "defaultWorkAttributes": "Desarrollo e Implementacion",
   "inactivityThresholdMinutes": 10,
+  "logRetentionMonths": 3,
   "nudge": {
     "enabled": true,
     "cooldownMinutes": 30,
-    "pushReminderAfterHours": 4,
-    "endOfDayHour": 17
+    "pushReminderAfterHours": 4
   }
 }
 ```
@@ -66,7 +67,12 @@ El loader busca `.env` en este orden: `DOTENV_PATH` > junto a `MCP_CONFIG_PATH` 
 | `defaultIssueKey` | Issue fallback cuando no se detecta una key en branch o descripción |
 | `defaultWorkAttributes` | String o array `[{key,value}]` para atributos default de Tempo |
 | `inactivityThresholdMinutes` | Gap entre ACTIVITY logs que cierra una "ventana" de trabajo (default 10) |
-| `nudge.*` | Cooldown, hora de fin de día y umbral de horas sin pushear para disparar reminders |
+| `logRetentionMonths` | Meses de logs de sesión que se conservan en `.logs/` (default 3) |
+| `nudge.enabled` | Master switch (default `true`) |
+| `nudge.cooldownMinutes` | Cooldown entre nudges para no spamear al dev (default 30) |
+| `nudge.pushReminderAfterHours` | Umbral de horas sin pushear para disparar el recordatorio de push-overdue (default 4) |
+
+> **Nudge flow**: el primer prompt de cada día calendario dispara un saludo de buenos días (con o sin sesiones pendientes según el estado). Después del saludo, si quedan sesiones sin pushear y pasaron más de `pushReminderAfterHours` desde el último push, se vuelve a recordar. Cooldown global (`cooldownMinutes`) evita repeticiones dentro del mismo bloque de tiempo.
 
 ## Hooks de Claude Code
 
@@ -108,15 +114,17 @@ node dist/cli.js nudge-check
 - **`tempo_delete_worklog`** — borra worklog por `tempoWorklogId`
 - **`push_tempo_worklogs`** — pushea worklogs confirmados desde el output de `preview_tempo_push`. Incluye marker `[session:id]` en la descripción para dedup
 
-## Skill de Claude Code (opcional pero recomendada)
+## Skill de Claude Code
 
-`skills/worklog-tracker/SKILL.md` define cómo el agente maneja el push workflow y los nudges. Para activarla:
+`skills/worklog-tracker/SKILL.md` define cómo el agente maneja el push workflow y los nudges. **`install.sh` la symlinkea automáticamente** a `~/.claude/skills/worklog-tracker/SKILL.md`, así que cualquier `git pull` futuro la actualiza sin re-correr el install.
 
-1. Copiá `skills/worklog-tracker/SKILL.md` a `~/.claude/skills/worklog-tracker/SKILL.md`
-2. Referencialá en tu `~/.claude/CLAUDE.md`:
+Claude Code la auto-descubre por su frontmatter (`name` + `description`) — no hace falta editar `~/.claude/CLAUDE.md`.
 
-```markdown
-| Session start, resume, commit, push, time tracking, tempo, horas | `~/.claude/skills/worklog-tracker/SKILL.md` |
+Si por algún motivo querés instalarla a mano (ej. en una máquina sin acceso a este repo):
+
+```bash
+mkdir -p ~/.claude/skills/worklog-tracker
+ln -s "$(pwd)/skills/worklog-tracker/SKILL.md" ~/.claude/skills/worklog-tracker/SKILL.md
 ```
 
 Sin la skill, el MCP server sigue funcionando — solo perdés el comportamiento guiado del agente (preview → confirm → push, manejo de nudges).
@@ -148,8 +156,9 @@ Usá rutas absolutas para evitar problemas de `cwd`.
 ## Uninstall
 
 ```bash
-scripts/setup-global-hooks.sh --remove
-claude mcp remove worklog-tracker -s user   # opcional
+scripts/setup-global-hooks.sh --remove                # quita SOLO los hooks de wt (preserva otros)
+rm ~/.claude/skills/worklog-tracker/SKILL.md           # quita el symlink de la skill
+claude mcp remove worklog-tracker -s user              # desregistra el MCP server
 ```
 
-Esto remueve solo los hooks de worklog-tracker (preserva otros) y desregistra el MCP. El resto del proyecto se borra manualmente.
+`.env`, `mcp.config.json` y `.logs/` quedan intactos — borralos a mano si querés un cleanup total.

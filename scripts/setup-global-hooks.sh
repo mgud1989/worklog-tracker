@@ -72,9 +72,12 @@ if [[ ! -x "$SESSION_LOGGER" ]]; then
   exit 1
 fi
 
+# Auto-create ~/.claude/settings.json if missing — a fresh dev may have never
+# launched Claude Code yet. Empty `{}` is a valid base for the jq merge below.
 if [[ ! -f "$CLAUDE_SETTINGS" ]]; then
-  echo "ERROR: $CLAUDE_SETTINGS not found. Is Claude Code installed?" >&2
-  exit 1
+  mkdir -p "$(dirname "$CLAUDE_SETTINGS")"
+  echo '{}' > "$CLAUDE_SETTINGS"
+  echo "Created $CLAUDE_SETTINGS (was missing)."
 fi
 
 # ── Build hooks (session-logger + nudge hook) ─────────────────────────────────
@@ -93,9 +96,36 @@ ENDJSON
 )
 
 # ── Merge into settings.json ────────────────────────────────────────────────
+# Two-phase merge to preserve any other hooks the dev has installed (custom
+# scripts, other tools, etc.):
+#   Phase 1: strip every entry whose command references session-logger.sh or
+#            "dist/cli.js nudge-check". This drops stale paths from prior
+#            installs (different repo location, renamed script, etc.) so the
+#            operation is fully idempotent.
+#   Phase 2: append our matcher entries to each event array, leaving any
+#            non-worklog-tracker matchers untouched.
 echo "Installing worklog-tracker hooks into $CLAUDE_SETTINGS..."
 
-if ! jq --argjson hooks "$HOOKS_JSON" '.hooks = $hooks' "$CLAUDE_SETTINGS" > "${CLAUDE_SETTINGS}.tmp"; then
+if ! jq --argjson new "$HOOKS_JSON" '
+  def is_wt_cmd: contains("session-logger.sh") or contains("dist/cli.js nudge-check");
+
+  # Phase 1: ensure .hooks exists, then strip any existing wt entries.
+  .hooks = (.hooks // {})
+  | .hooks |= with_entries(
+      .value |= (
+        map(.hooks |= map(select(.command | is_wt_cmd | not)))
+        | map(select(.hooks | length > 0))
+      )
+    )
+
+  # Phase 2: append our new matchers per event (preserves user matchers).
+  | reduce ($new | to_entries[]) as $entry (.;
+      .hooks[$entry.key] = ((.hooks[$entry.key] // []) + $entry.value)
+    )
+
+  # Drop any event keys that ended up with no matchers.
+  | .hooks |= with_entries(select(.value | length > 0))
+' "$CLAUDE_SETTINGS" > "${CLAUDE_SETTINGS}.tmp"; then
   rm -f "${CLAUDE_SETTINGS}.tmp"
   echo "ERROR: jq failed to process $CLAUDE_SETTINGS — file untouched." >&2
   exit 1

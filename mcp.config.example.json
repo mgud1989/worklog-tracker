@@ -2,6 +2,8 @@
   "timezone": "America/Argentina/Buenos_Aires",
   "defaultIssueKey": "HORAS-1",
   "defaultWorkAttributes": "Desarrollo e Implementacion",
+  "inactivityThresholdMinutes": 10,
+  "logRetentionMonths": 3,
   "nudge": {
     "enabled": true,
     "cooldownMinutes": 30,

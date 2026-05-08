@@ -131,8 +131,41 @@ else
   ERRORS=$((ERRORS + 1))
 fi
 
-# ── Step 7: Initialize state file directory ───────────────────────────────
-step 7 "Initializing state and log directories"
+# ── Step 7: Install Claude Code skill (via symlink) ──────────────────────
+# Symlink (not copy) so future `git pull` updates the skill without re-running
+# install.sh. The skill itself is auto-discovered by Claude Code from
+# ~/.claude/skills/<name>/SKILL.md — no edits to ~/.claude/CLAUDE.md needed.
+step 7 "Installing Claude Code skill (symlink)"
+
+SKILL_SRC="${SCRIPT_DIR}/skills/worklog-tracker/SKILL.md"
+SKILL_DST_DIR="${HOME}/.claude/skills/worklog-tracker"
+SKILL_DST="${SKILL_DST_DIR}/SKILL.md"
+
+if [[ ! -f "$SKILL_SRC" ]]; then
+  fail "Source skill not found at $SKILL_SRC"
+  ERRORS=$((ERRORS + 1))
+else
+  mkdir -p "$SKILL_DST_DIR"
+
+  if [[ -L "$SKILL_DST" ]]; then
+    # Existing symlink — refresh in case the source path changed.
+    rm -f "$SKILL_DST"
+    ln -s "$SKILL_SRC" "$SKILL_DST"
+    ok "Skill symlink refreshed -> $SKILL_DST"
+  elif [[ -e "$SKILL_DST" ]]; then
+    # Real file in the way — back it up before symlinking, never overwrite.
+    BACKUP="${SKILL_DST}.bak.$(date +%Y%m%d-%H%M%S)"
+    mv "$SKILL_DST" "$BACKUP"
+    ln -s "$SKILL_SRC" "$SKILL_DST"
+    ok "Skill installed (existing file backed up to $(basename "$BACKUP"))"
+  else
+    ln -s "$SKILL_SRC" "$SKILL_DST"
+    ok "Skill symlinked -> $SKILL_DST"
+  fi
+fi
+
+# ── Step 8: Initialize state file directory ───────────────────────────────
+step 8 "Initializing state and log directories"
 
 if [[ -f .logs/.gitkeep ]]; then
   ok ".logs/ already exists -- skipping mkdir"
@@ -147,14 +180,18 @@ else
   ok ".state.json will be created on first tempo push"
 fi
 
-# ── Step 8: Verify the build works ────────────────────────────────────────
-step 8 "Verifying build"
+# ── Step 9: Verify the build works ────────────────────────────────────────
+# Use `nudge-check` because it's silent-on-success, swallows all errors
+# (designed to never block the user prompt) and exits 0 if the bundle loads
+# and mcp.config.json is valid. Calling `node dist/cli.js` with no args
+# always exits 1 (Unknown command), which would defeat any `pipefail` check.
+step 9 "Verifying build"
 
 if [[ -f dist/cli.js ]]; then
-  if node dist/cli.js 2>&1 | head -1 >/dev/null; then
-    ok "dist/cli.js is loadable"
+  if node dist/cli.js nudge-check >/dev/null 2>&1; then
+    ok "dist/cli.js is loadable (nudge-check returned 0)"
   else
-    fail "dist/cli.js exists but failed to load"
+    fail "dist/cli.js exists but failed to run nudge-check"
     ERRORS=$((ERRORS + 1))
   fi
 else
@@ -169,8 +206,8 @@ else
   ERRORS=$((ERRORS + 1))
 fi
 
-# ── Step 9: Register MCP server in Claude Code ───────────────────────────
-step 9 "Registering MCP server in Claude Code"
+# ── Step 10: Register MCP server in Claude Code ──────────────────────────
+step 10 "Registering MCP server in Claude Code"
 
 if ! command -v claude &>/dev/null; then
   warn "claude CLI not found -- skipping MCP registration"
@@ -206,11 +243,12 @@ echo -e "${BOLD}═════════════════════�
 
 echo ""
 echo -e "${BOLD}What was configured:${NC}"
-echo -e "  ${GREEN}*${NC} npm dependencies installed and project built"
-echo -e "  ${GREEN}*${NC} Claude Code hooks: session logger on session start/stop/activity"
-echo -e "  ${GREEN}*${NC} Session logger: tracks activity in .logs/"
-echo -e "  ${GREEN}*${NC} State file: push history persisted across sessions"
-echo -e "  ${GREEN}*${NC} Nudge system: MCP tools remind about unpushed sessions"
+echo -e "  ${GREEN}*${NC} npm dependencies installed and project built (dist/)"
+echo -e "  ${GREEN}*${NC} Claude Code hooks merged into ~/.claude/settings.json (other hooks preserved)"
+echo -e "  ${GREEN}*${NC} Skill symlinked -> ~/.claude/skills/worklog-tracker/SKILL.md (git pull updates it)"
+echo -e "  ${GREEN}*${NC} Session logger writes to .logs/session-YYYY-MM.log"
+echo -e "  ${GREEN}*${NC} State file (.logs/.state.json) tracks push history + nudge cooldown"
+echo -e "  ${GREEN}*${NC} MCP server registered with Claude Code (scope: user)"
 
 echo ""
 echo -e "${BOLD}${YELLOW}Action required -- fill in your tokens:${NC}"
@@ -220,8 +258,16 @@ echo -e "     ${CYAN}*${NC} Tempo   -> Tempo > Settings > API Integration"
 echo -e "     ${CYAN}*${NC} Jira    -> https://id.atlassian.com/manage-profile/security/api-tokens"
 echo ""
 echo -e "  ${CYAN}2.${NC} Edit ${BOLD}mcp.config.json${NC} with your settings:"
-echo -e "     ${CYAN}*${NC} nudge config -> enable/disable push reminders (enabled by default)"
+echo -e "     ${CYAN}*${NC} ${BOLD}defaultIssueKey${NC}     -> fallback Jira key when branch has no PROJ-123"
+echo -e "     ${CYAN}*${NC} ${BOLD}timezone${NC}            -> IANA tz (default America/Argentina/Buenos_Aires)"
+echo -e "     ${CYAN}*${NC} ${BOLD}nudge.enabled${NC}       -> set to false to silence push reminders"
 echo ""
-echo -e "  ${CYAN}3.${NC} Restart Claude Code to pick up hooks and MCP server"
+echo -e "  ${CYAN}3.${NC} Restart Claude Code to pick up hooks, skill, and MCP server"
+echo ""
+echo -e "${BOLD}To uninstall:${NC}"
+echo -e "  ${CYAN}*${NC} Remove hooks:  ${BOLD}scripts/setup-global-hooks.sh --remove${NC}"
+echo -e "  ${CYAN}*${NC} Remove skill:  ${BOLD}rm ~/.claude/skills/worklog-tracker/SKILL.md${NC}"
+echo -e "  ${CYAN}*${NC} Remove MCP:    ${BOLD}claude mcp remove worklog-tracker -s user${NC}"
+echo -e "  ${CYAN}*${NC} ${BOLD}.env${NC}, ${BOLD}mcp.config.json${NC}, and ${BOLD}.logs/${NC} are preserved (delete manually if desired)"
 echo ""
 echo -e "${BOLD}══════════════════════════════════════════${NC}"

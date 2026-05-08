@@ -75,7 +75,8 @@ It is intended for engineering teams where worklog integrity affects billing and
 ### Nudge
 
 - `src/nudge.ts`
-  - Builds nudge text from state + config (`pushReminderAfterHours`, `endOfDayHour`)
+  - Builds nudge text from state + config (`pushReminderAfterHours`)
+  - Morning greeting on first prompt of the calendar day (in `timezone`); after that, push-overdue when unpushed sessions exceed `pushReminderAfterHours` since last push
   - Returns `null` when nothing should be nudged
   - Used by `nudge-check` CLI in the UserPromptSubmit hook
 
@@ -175,12 +176,12 @@ The catalog exposed to MCP clients depends on the credentials available in `.env
   - `defaultIssueKey`
   - `defaultWorkAttributes` (string or array)
   - `inactivityThresholdMinutes` (default 10)
+  - `logRetentionMonths` (default 3)
   - `nudge.enabled` (default true)
   - `nudge.cooldownMinutes` (default 30)
   - `nudge.pushReminderAfterHours` (default 4)
-  - `nudge.endOfDayHour` (default 19)
 
-Note: the schema is **strict** — any unknown field (e.g. a stale `mode` or `workspaceId`) causes startup to fail with a Zod validation error. This is intentional.
+Note: the schema is **strict** — any unknown field (e.g. a stale `mode`, `workspaceId`, or `endOfDayHour` from a pre-`8557ec7` checkout) causes startup to fail with a Zod validation error. This is intentional.
 
 ## Reliability and Billing Integrity Considerations
 
