@@ -209,6 +209,7 @@ async function runTempoPushCommand(flags: string[]): Promise<void> {
   // Step 2: Consolidate into worklogs
   const worklogs = consolidateSessions(entries, {
     inactivityThresholdMinutes: appConfig.inactivityThresholdMinutes,
+    timezone: appConfig.timezone,
     defaultIssueKey: appConfig.defaultIssueKey,
   });
 

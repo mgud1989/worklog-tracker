@@ -10,6 +10,7 @@ const MINIMUM_WINDOW_MINUTES = 1;
 
 type ConsolidateOptions = {
   inactivityThresholdMinutes: number;
+  timezone: string;
   defaultIssueKey?: string;
 };
 
@@ -151,22 +152,27 @@ function computeWorkWindows(
 // ─── Cross-Midnight Splitting ──────────────────────────────────────────
 
 /**
- * If a work window spans midnight, split it into two windows at 00:00.
+ * If a work window spans midnight (in the configured timezone), split it
+ * into two windows at the local 00:00 boundary of that timezone.
  */
-function splitCrossMidnightWindows(windows: WorkWindow[]): WorkWindow[] {
+function splitCrossMidnightWindows(
+  windows: WorkWindow[],
+  timezone: string,
+  dateFmt: Intl.DateTimeFormat,
+): WorkWindow[] {
   const result: WorkWindow[] = [];
 
   for (const w of windows) {
-    const startDay = getDateString(w.start);
-    const endDay = getDateString(w.end);
+    const startDay = getDateString(w.start, dateFmt);
+    const endDay = getDateString(w.end, dateFmt);
 
     if (startDay === endDay) {
       result.push(w);
       continue;
     }
 
-    // Split at midnight: first part ends at 23:59:59.999, second starts at 00:00:00
-    const midnight = new Date(w.end.getFullYear(), w.end.getMonth(), w.end.getDate(), 0, 0, 0);
+    // Midnight = first UTC instant of `endDay` in the configured timezone.
+    const midnight = startOfDayInTimezone(endDay, timezone);
 
     const firstDuration = (midnight.getTime() - w.start.getTime()) / (60 * 1000);
     const secondDuration = (w.end.getTime() - midnight.getTime()) / (60 * 1000);
@@ -217,8 +223,24 @@ export function consolidateSessions(
     allWindows.push(...windows);
   }
 
+  // Pin date/time formatting to the configured timezone so worklog labels
+  // (date, startTime) and the cross-midnight split don't drift with the
+  // process-local TZ (e.g. CI running in UTC).
+  const dateFmt = new Intl.DateTimeFormat("en-CA", {
+    timeZone: options.timezone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  });
+  const timeFmt = new Intl.DateTimeFormat("en-GB", {
+    timeZone: options.timezone,
+    hour: "2-digit",
+    minute: "2-digit",
+    hourCycle: "h23",
+  });
+
   // Split cross-midnight windows
-  allWindows = splitCrossMidnightWindows(allWindows);
+  allWindows = splitCrossMidnightWindows(allWindows, options.timezone, dateFmt);
 
   // Consolidate by (date, folder, branch). Folder is part of the key so two repos
   // sharing the same branch name (e.g. `main`) don't get merged into one worklog.
@@ -237,7 +259,7 @@ export function consolidateSessions(
   >();
 
   for (const w of allWindows) {
-    const date = getDateString(w.start);
+    const date = getDateString(w.start, dateFmt);
     const key = `${date}|${w.folder ?? ""}|${w.branch}`;
 
     const bucket = buckets.get(key) ?? {
@@ -272,7 +294,7 @@ export function consolidateSessions(
       issueKey: issueKey ?? "",
       branch: bucket.branch,
       date: bucket.date,
-      startTime: getTimeString(bucket.earliestStart),
+      startTime: getTimeString(bucket.earliestStart, timeFmt),
       durationHours,
       sessionIds,
       windowCount: bucket.windowCount,
@@ -370,15 +392,43 @@ export function filterAlreadyPushed(
 
 // ─── Helpers ───────────────────────────────────────────────────────────
 
-function getDateString(date: Date): string {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, "0");
-  const day = String(date.getDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
+function getDateString(date: Date, dateFmt: Intl.DateTimeFormat): string {
+  return dateFmt.format(date);
 }
 
-function getTimeString(date: Date): string {
-  const hours = String(date.getHours()).padStart(2, "0");
-  const minutes = String(date.getMinutes()).padStart(2, "0");
-  return `${hours}:${minutes}`;
+function getTimeString(date: Date, timeFmt: Intl.DateTimeFormat): string {
+  return timeFmt.format(date);
+}
+
+/**
+ * Return the UTC instant corresponding to 00:00:00 on the given local date
+ * (YYYY-MM-DD) interpreted in `timezone`. Handles DST by computing the TZ
+ * offset at noon of that local date (avoids the 1-2am DST gap/overlap).
+ */
+function startOfDayInTimezone(localDate: string, timezone: string): Date {
+  const [y, m, d] = localDate.split("-").map(Number);
+  // Anchor at noon UTC of the same Y-M-D to read the TZ's offset for that day.
+  const utcNoonAnchor = new Date(Date.UTC(y, m - 1, d, 12, 0, 0));
+  const fmt = new Intl.DateTimeFormat("en-GB", {
+    timeZone: timezone,
+    hourCycle: "h23",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+  const parts: Record<string, string> = {};
+  for (const p of fmt.formatToParts(utcNoonAnchor)) {
+    parts[p.type] = p.value;
+  }
+  const localAsUtcMs = Date.UTC(
+    Number(parts.year),
+    Number(parts.month) - 1,
+    Number(parts.day),
+    Number(parts.hour),
+    Number(parts.minute),
+  );
+  const offsetMs = localAsUtcMs - utcNoonAnchor.getTime();
+  return new Date(Date.UTC(y, m - 1, d, 0, 0, 0) - offsetMs);
 }

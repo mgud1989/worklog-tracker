@@ -354,6 +354,7 @@ async function bootstrap() {
 
         const worklogs = consolidateSessions(filteredEntries, {
           inactivityThresholdMinutes: appConfig.inactivityThresholdMinutes,
+          timezone: appConfig.timezone,
           defaultIssueKey: appConfig.defaultIssueKey,
         });
 
