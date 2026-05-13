@@ -1,6 +1,6 @@
 ---
 name: worklog-tracker
-description: Manage session-based Tempo worklog consolidation during coding sessions
+description: Manage Tempo worklogs (push/preview/delete). When a ⏰ or ☕ banner appears in a system-reminder, it is a nudge instruction for the agent (format "instruction + Data:") — reformulate it for the dev in their language and relay it in your next reply.
 triggers:
   - session start
   - session resume
@@ -37,13 +37,20 @@ Use `tempo_delete_worklog` if a bad push needs reverting (find the ID via `tempo
 ## Nudge System
 
 `UserPromptSubmit` hook runs `nudge-check` and injects reminders into your context when:
-- It's the dev's first prompt of the calendar day → morning greeting (with or without pending sessions)
-- After that, if there are unpushed sessions AND more than `pushReminderAfterHours` (default 4h) have passed since the last push
+- It's the dev's first prompt of the calendar day → morning greeting (☕, with or without pending sessions)
+- After that, if there are unpushed sessions AND more than `pushReminderAfterHours` (default 4h) have passed since the last push (⏰)
 - Cooldown of `cooldownMinutes` (default 30) gates back-to-back nudges
 
-When you see a nudge:
-1. Mention it naturally to the dev ("By the way, you have unpushed sessions from today")
-2. Offer to run `preview_tempo_push`
+Nudge format is **instruction + data**:
+
+```
+⏰ Remind the dev they have unpushed sessions; offer preview_tempo_push. Data: unpushed=131, last_push_hours_ago=100, oldest_pending=2026-03-27.
+```
+
+The text after the emoji is an imperative instruction for YOU (the agent), not a message for the dev. The dev never sees the banner directly. When you see one:
+
+1. Reformulate the instruction naturally in the dev's language (Spanish/English/etc.) using the data fields
+2. Offer to run `preview_tempo_push` when the instruction says so
 3. Do NOT push without explicit confirmation
 
 ## Rules

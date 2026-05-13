@@ -12,6 +12,14 @@ export interface NudgeContext {
   nudgeConfig: NudgeConfig;
 }
 
+// ─── Nudge format ─────────────────────────────────────────────────────
+// Each nudge is "instruction + data": an imperative phrase telling the
+// agent what to relay, followed by raw data the agent uses to compose the
+// user-facing message. The leading emoji (⏰ or ☕) is a stable anchor for
+// the skill's description-based auto-activation. The nudge is injected via
+// UserPromptSubmit hook into a <system-reminder>; the dev never sees it
+// directly, the agent reformulates it (in the dev's language) and relays it.
+
 // ─── Helpers ──────────────────────────────────────────────────────────
 
 /**
@@ -128,21 +136,18 @@ export function buildNudge(ctx: NudgeContext): string | null {
     sessionLogDir,
     stateManager,
   );
-  const oldestLine = oldestPendingDate ? `\noldest pending: ${oldestPendingDate}` : "";
 
   const morningDue = isFirstPromptOfDay(stateManager.getLastNudgeAt(), timezone);
 
   // Branch (a): morning + pending → priority over push-overdue
   if (morningDue && unpushedCount > 0) {
-    const sessionLabel = unpushedCount === 1 ? "sesión" : "sesiones";
-    const pendLabel = unpushedCount === 1 ? "pendiente" : "pendientes";
-    const oldestPart = oldestPendingDate ? ` (la más vieja del ${oldestPendingDate})` : "";
-    return `\n\n☕ Buen día — tenés ${unpushedCount} ${sessionLabel} ${pendLabel} de pushear${oldestPart}. Corré preview_tempo_push para revisarlas y subirlas.`;
+    const oldestPart = oldestPendingDate ? `, oldest_pending=${oldestPendingDate}` : "";
+    return `\n\n☕ Greet the dev (new day) and inform them they have unpushed sessions from previous work; offer preview_tempo_push. Data: unpushed=${unpushedCount}${oldestPart}.`;
   }
 
   // Branch (b): morning + nothing pending → warm ack (NEVER null in morning-mode)
   if (morningDue && unpushedCount === 0) {
-    return `\n\n☕ Buen día — no tenés horas pendientes para pushear.`;
+    return `\n\n☕ Greet the dev (new day) and confirm no pending sessions to push. Data: unpushed=0.`;
   }
 
   // Branch (c): not morning, nothing pending → null
@@ -155,9 +160,10 @@ export function buildNudge(ctx: NudgeContext): string | null {
     (hoursSinceLastPush !== null && hoursSinceLastPush > nudgeConfig.pushReminderAfterHours);
 
   if (pushOverdue) {
-    const lastPushText = lastPushAt === null ? "never" : `${hoursSinceLastPush} hours ago`;
-    const sessionLabel = unpushedCount === 1 ? "session" : "sessions";
-    return `\n\n⏰ You have ${unpushedCount} unpushed ${sessionLabel}. Last push: ${lastPushText}. Consider running preview_tempo_push to review and push.${oldestLine}`;
+    const lastPushPart =
+      lastPushAt === null ? "last_push=never" : `last_push_hours_ago=${hoursSinceLastPush}`;
+    const oldestPart = oldestPendingDate ? `, oldest_pending=${oldestPendingDate}` : "";
+    return `\n\n⏰ Remind the dev they have unpushed sessions; offer preview_tempo_push. Data: unpushed=${unpushedCount}, ${lastPushPart}${oldestPart}.`;
   }
 
   return null;
