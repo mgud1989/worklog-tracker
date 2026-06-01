@@ -150,8 +150,25 @@ Usá rutas absolutas para evitar problemas de `cwd`.
 
 ## Getting API Tokens
 
-1. **Tempo** — Tempo > Settings > API Integration → crear token
-2. **Jira** — [id.atlassian.com/manage-profile/security/api-tokens](https://id.atlassian.com/manage-profile/security/api-tokens) → crear token
+### Jira API Token
+
+Generalo en [id.atlassian.com/manage-profile/security/api-tokens](https://id.atlassian.com/manage-profile/security/api-tokens).
+
+- **Token clásico** (sin scopes): hereda los permisos del usuario. Necesita _Browse Projects_ sobre los proyectos a loguear y los permisos de usuario default. Suficiente para la mayoría de los casos.
+- **Scoped token** (versión nueva): alcanza con `read:jira-user` + `read:jira-work`. No necesitás `write:jira-work` — el tracker no escribe en Jira, todos los worklogs van por Tempo.
+
+### Tempo API Token
+
+Generalo en Tempo > Settings > API Integration. Al crearlo podés elegir los scopes — tildá solo estos:
+
+| Scope | Para qué |
+|-------|----------|
+| `View worklogs` | `GET /worklogs` (paginado) |
+| `Manage worklogs` | `POST /worklogs`, `DELETE /worklogs/{id}` (incluye View) |
+| `View accounts` | `GET /accounts/{id}` |
+| `View work attributes` | `GET /work-attributes` |
+
+No hace falta nada de admin, planning ni teams.
 
 ## Uninstall
 
